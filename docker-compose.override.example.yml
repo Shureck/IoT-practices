@@ -1,0 +1,15 @@
+# Пример: сайт за обратным прокси, который сам работает в Docker (Caddy, Traefik, nginx).
+# Скопируйте в docker-compose.override.yml и замените имя сети на сеть вашего прокси
+# (`docker network ls`). Прокси обращается к сайту по имени esp32lab-app:8080.
+# В .env при этом: APP_PORT=127.0.0.1:8080, COOKIE_SECURE=1, TRUST_PROXY=1.
+services:
+  app:
+    networks:
+      default: {}
+      proxy:
+        aliases: [esp32lab-app]
+
+networks:
+  proxy:
+    name: my-proxy-network
+    external: true

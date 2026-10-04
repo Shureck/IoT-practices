@@ -43,13 +43,73 @@ docker compose logs -f app
 `COOKIE_SECURE=1`, `TRUST_PROXY=1`. Прошивка платы из браузера (Web Serial) работает только по HTTPS
 или на `localhost`.
 
-Пример для Caddy:
+Пример для Caddy, установленного на хосте:
 
 ```
 lab.example.ru {
     reverse_proxy 127.0.0.1:8080
 }
 ```
+
+#### Прокси в Docker на общем сервере
+
+Если на сервере уже работает Caddy/Traefik/nginx в Docker и занимает порты 80/443, подключите сайт к сети прокси
+вместо публикации порта наружу:
+
+1. `cp docker-compose.override.example.yml docker-compose.override.yml` и укажите в нём имя сети прокси
+   (`docker network ls`).
+2. В `.env`: `APP_PORT=127.0.0.1:8080` (порт виден только с самого сервера), `COOKIE_SECURE=1`, `TRUST_PROXY=1`,
+   `MQTT_PUBLIC_HOST=<домен сайта>`.
+3. В конфигурации прокси направьте домен на `esp32lab-app:8080`, например для Caddy:
+
+   ```
+   lab.example.ru {
+       encode gzip zstd
+       reverse_proxy esp32lab-app:8080
+   }
+   ```
+
+   и перезагрузите его без простоя: `docker exec <контейнер-caddy> caddy reload --config /etc/caddy/Caddyfile`.
+4. `docker compose up -d`. Проверка: `curl https://lab.example.ru/api/health`.
+
+WebSocket `/mqtt` Caddy проксирует сам, дополнительных настроек не нужно.
+
+### Если сервер не может скачать ядро ESP32 (403 от downloads.arduino.cc)
+
+Сборка образа `compiler` скачивает индексы и инструменты с `downloads.arduino.cc`. С некоторых серверов (в том числе
+из российских сетей) этот адрес отвечает `403 Forbidden`, и сборка падает на шаге
+`arduino-cli core update-index`. Соберите образ там, где загрузка работает (например, на своём компьютере
+с Docker Desktop), и перенесите готовый образ на сервер:
+
+```bash
+docker compose build compiler
+docker save esp32lab-compiler:latest | gzip -1 | ssh root@<сервер> docker load
+```
+
+Сжатый образ — около 1,5 ГБ. Затем на сервере запускайте без пересборки компилятора:
+
+```bash
+docker compose build app
+docker compose up -d --no-build
+```
+
+Без компилятора сайт тоже работает: симулятор, практики, автопроверки и MQTT доступны. Не будет только
+прошивки настоящих плат, а `/api/health` покажет `"compiler":false`.
+
+### Небольшой или общий сервер
+
+Сервис компиляции — самый тяжёлый: одна сборка скетча занимает до ~1 ГБ памяти и почти целое ядро на 10–30 секунд
+(первая после запуска — дольше). Сам сайт занимает ~100 МБ, Mosquitto — единицы мегабайт. На сервере с 4 ГБ памяти,
+где работают и другие проекты, ограничьте компилятор одной сборкой за раз:
+
+```
+COMPILER_SLOTS=1
+COMPILER_CPUS=2
+COMPILER_MEM=1536m
+CHECK_WORKERS=2
+```
+
+Остальные запросы на компиляцию будут ждать своей очереди.
 
 ## Переменные окружения
 
@@ -158,6 +218,9 @@ git pull
 docker compose up -d --build        # пересоберёт app (и compiler, если менялся compiler/)
 docker image prune -f               # удалить старые слои
 ```
+
+Если образ компилятора переносится вручную (см. выше), обновляйте только сайт:
+`git pull && docker compose up -d --build app`.
 
 Миграции базы выполняются автоматически при старте. Данные в томах сохраняются. Перед крупным обновлением
 сделайте резервную копию (см. выше).
