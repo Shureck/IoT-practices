@@ -1,0 +1,38 @@
+{
+  "name": "@esp32lab/server",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "node build.mjs",
+    "start": "node dist/server.mjs",
+    "test": "vitest run",
+    "typecheck": "tsc -p ."
+  },
+  "dependencies": {
+    "@esp32lab/content": "*",
+    "@esp32lab/sim": "*",
+    "@fastify/cookie": "^11.1.2",
+    "@fastify/http-proxy": "^11.6.3",
+    "@fastify/rate-limit": "^11.2.0",
+    "@fastify/static": "^10.1.5",
+    "bcryptjs": "^2.4.3",
+    "better-sqlite3": "^11.10.0",
+    "fastify": "^5.12.5",
+    "jsonwebtoken": "^9.0.3",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/node": "^20.19.43",
+    "@types/ws": "^8.18.2",
+    "esbuild": "^0.28.2",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3",
+    "vitest": "^2.1.9",
+    "ws": "^8.22.0"
+  }
+}

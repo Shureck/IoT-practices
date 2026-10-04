@@ -1,0 +1,22 @@
+# Контекст сборки образа приложения (Dockerfile в корне)
+**/node_modules
+**/dist
+**/.vite
+**/coverage
+**/*.log
+**/.DS_Store
+.git
+.gitignore
+.env
+.env.*
+!.env.example
+data
+**/data
+compiler
+mosquitto
+docs
+.claude
+*.md
+docker-compose*.yml
+Dockerfile
+.dockerignore

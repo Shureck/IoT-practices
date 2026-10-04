@@ -1,0 +1,11 @@
+{
+  "name": "@esp32lab/content",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "exports": { ".": "./src/index.ts", "./modules": "./src/modules.ts", "./types": "./src/types.ts" },
+  "scripts": { "test": "vitest run", "typecheck": "tsc -p ." },
+  "dependencies": { "@esp32lab/sim": "*" },
+  "devDependencies": { "vitest": "^2.1.8", "typescript": "^5.6.3" }
+}

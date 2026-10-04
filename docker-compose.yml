@@ -1,0 +1,52 @@
+# ESP32 Lab: веб-приложение + сервис компиляции + MQTT-брокер.
+# Запуск: docker compose up -d --build   (настройки — в .env, см. .env.example)
+name: esp32lab
+
+services:
+  app:
+    build: .
+    image: esp32lab-app
+    restart: unless-stopped
+    ports:
+      - "${APP_PORT:-8080}:8080"
+    environment:
+      PORT: "8080"
+      DATA_DIR: /data
+      COMPILER_URL: http://compiler:8090
+      MQTT_WS_URL: ws://mosquitto:9001
+      MQTT_PUBLIC_HOST: ${MQTT_PUBLIC_HOST:-}
+      MQTT_PUBLIC_PORT: ${MQTT_PUBLIC_PORT:-1883}
+      TEACHER_INVITE: ${TEACHER_INVITE:-teacher2025}
+      JWT_SECRET: ${JWT_SECRET:-}
+      SEED_DEMO: ${SEED_DEMO:-1}
+      COOKIE_SECURE: ${COOKIE_SECURE:-0}
+      TRUST_PROXY: ${TRUST_PROXY:-0}
+      CHECK_WORKERS: ${CHECK_WORKERS:-}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    volumes:
+      - app-data:/data
+    depends_on:
+      - compiler
+      - mosquitto
+
+  compiler:
+    build: ./compiler
+    image: esp32lab-compiler
+    restart: unless-stopped
+    environment:
+      SLOTS: ${COMPILER_SLOTS:-2}
+    cpus: ${COMPILER_CPUS:-2}
+    mem_limit: ${COMPILER_MEM:-3g}
+
+  mosquitto:
+    image: eclipse-mosquitto:2
+    restart: unless-stopped
+    ports:
+      - "${MQTT_PORT:-1883}:1883"
+    volumes:
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - mosquitto-data:/mosquitto/data
+
+volumes:
+  app-data:
+  mosquitto-data:

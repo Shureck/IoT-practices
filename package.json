@@ -1,0 +1,16 @@
+{
+  "name": "esp32-lab",
+  "private": true,
+  "version": "1.0.0",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev:web": "npm run dev -w apps/web",
+    "dev:server": "npm run dev -w apps/server",
+    "build": "npm run build -w apps/web && npm run build -w apps/server",
+    "test": "npm test -w packages/sim && npm test -w packages/content && npm test -w apps/server",
+    "typecheck": "tsc -p packages/sim && tsc -p packages/content && tsc -p apps/web && tsc -p apps/server"
+  }
+}
