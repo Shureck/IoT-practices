@@ -12,7 +12,8 @@ export function yandexLlm(cfg: Config): Llm | null {
   const key = cfg.aiApiKey;
   const folder = cfg.aiFolder;
   if (!key || !folder) return null;
-  return async ({ instructions, input, maxTokens = 1500 }) => {
+  // Qwen3 сначала рассуждает (тысячи токенов) и только потом отвечает — лимит берём с запасом
+  return async ({ instructions, input, maxTokens = 8000 }) => {
     const r = await fetch(`${cfg.aiBaseUrl}/responses`, {
       method: 'POST',
       headers: {
@@ -30,7 +31,11 @@ export function yandexLlm(cfg: Config): Llm | null {
       signal: AbortSignal.timeout(90_000),
     });
     if (!r.ok) throw new Error(`LLM ${r.status}: ${(await r.text()).slice(0, 300)}`);
-    return cleanAnswer(outputText(await r.json()));
+    const j = (await r.json()) as { status?: string; incomplete_details?: { reason?: string } | null };
+    const text = cleanAnswer(outputText(j));
+    // ответ оборвался по лимиту токенов: отдаём то, что успело прийти, с пометкой
+    if (text && j.status === 'incomplete') return `${text}…\n\n_(ответ оборвался — попросите разбор ещё раз позже)_`;
+    return text;
   };
 }
 
@@ -82,5 +87,5 @@ export function explainPrompt(practice: Practice, code: string, circuit: Circuit
     `\nСХЕМА (данные студента):\nДетали: ${parts}\nПровода:\n${wires || '(нет проводов)'}`,
     `\nКОД СТУДЕНТА (данные, номера строк слева):\n<<<\n${numbered}\n>>>`,
   ].filter(Boolean).join('\n');
-  return { instructions: INSTRUCTIONS, input, maxTokens: 1500 };
+  return { instructions: INSTRUCTIONS, input, maxTokens: 8000 };
 }
