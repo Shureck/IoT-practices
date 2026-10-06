@@ -27,6 +27,8 @@ export interface SubmissionRow {
   quiz_answers: string | null;
   grade: number | null;
   comment: string | null;
+  /** комментарий студента при сдаче */
+  student_comment: string | null;
   reviewer_id: number | null;
   created_at: string;
   reviewed_at: string | null;
@@ -43,6 +45,7 @@ export function submissionView(r: SubmissionRow) {
     xp: r.xp,
     grade: r.grade,
     comment: r.comment,
+    studentComment: r.student_comment ?? null,
     createdAt: r.created_at,
     reviewedAt: r.reviewed_at,
   };
@@ -58,4 +61,4 @@ export function submissionFull(r: SubmissionRow) {
 }
 
 /** Столбцы без кода и схемы — для списков. */
-export const SUMMARY_COLS = 's.id, s.user_id, s.practice_id, s.status, s.score, s.results, s.hints_used, s.xp, s.grade, s.comment, s.reviewer_id, s.created_at, s.reviewed_at';
+export const SUMMARY_COLS = 's.id, s.user_id, s.practice_id, s.status, s.score, s.results, s.hints_used, s.xp, s.grade, s.comment, s.student_comment, s.reviewer_id, s.created_at, s.reviewed_at';

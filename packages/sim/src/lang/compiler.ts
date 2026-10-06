@@ -92,7 +92,17 @@ class Fatal extends Error {}
 
 export function compileSketch(src: string): CompileOutput {
   const c = new Compiler();
-  return c.run(src);
+  try {
+    return c.run(src);
+  } catch (e) {
+    // Сбой самого транслятора не должен ронять страницу: показываем его как ошибку компиляции.
+    const diagnostics: Diag[] = [...c.diags.filter((d) => d.severity === 'error'), {
+      line: 1, col: 1, severity: 'error',
+      message: 'Симулятор не смог разобрать этот скетч',
+      hint: `Проверьте код рядом с последними правками. Если ошибка не уходит — сообщите преподавателю (${(e as Error)?.message ?? e})`,
+    }];
+    return { ok: false, diagnostics, includes: c.includes, features: c.features };
+  }
 }
 
 class Compiler {
@@ -354,7 +364,8 @@ class Compiler {
       try {
         if (it.kind === 'var') this.globalVar(it, head, init);
         else if (it.kind === 'class') body.push(this.emitClass(this.classes.get(it.name)!));
-        else if (it.kind === 'func' && !it.owner && it.body) body.push(this.emitFunc(it));
+        // повторное определение функции уже отмечено ошибкой и не зарегистрировано — его не генерируем
+        else if (it.kind === 'func' && !it.owner && it.body && this.funcs.get(it.name)?.some((x) => x.decl === it)) body.push(this.emitFunc(it));
       } catch (e) { this.record(e); }
     }
     this.out.push(...head, ...this.statics, ...body);

@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { CircuitDoc } from '@esp32lab/sim';
 import type { Practice } from '@esp32lab/content';
 import type { AppCtx } from '../ctx';
+import { assertOpen } from '../access';
 import { perUser } from '../ctx';
 import { requireUser } from '../auth';
 import { HttpError, badRequest, forbidden, notFound, parse } from '../errors';
@@ -19,6 +20,7 @@ const CheckBody = z.object({
 const SubmitBody = CheckBody.extend({
   hintsUsed: z.number({ invalid_type_error: 'Некорректное число подсказок' }).int().min(0).max(100).default(0),
   quizAnswers: z.array(z.array(z.number().int().min(0).max(100)).max(100)).max(500).optional(),
+  studentComment: z.string({ invalid_type_error: 'Комментарий должен быть строкой' }).max(2000, 'Комментарий слишком длинный (больше 2000 символов)').optional(),
 });
 
 export interface CheckOutput {
@@ -56,9 +58,10 @@ export function submissionRoutes(app: FastifyInstance, ctx: AppCtx) {
   const { db } = ctx;
 
   app.post('/api/check', { config: perUser(20) }, async (req) => {
-    requireUser(req);
+    const u = requireUser(req);
     const b = parse(CheckBody, req.body);
     const practice = practiceOr404(b.practiceId);
+    assertOpen(db, u, practice.id);
     if (practice.kind === 'quiz') throw badRequest('Квиз проверяется только при сдаче');
     const circuit = (b.circuit ?? practice.starterCircuit) as CircuitDoc;
     return runChecks(ctx, practice, b.code, circuit);
@@ -68,6 +71,7 @@ export function submissionRoutes(app: FastifyInstance, ctx: AppCtx) {
     const u = requireUser(req);
     const b = parse(SubmitBody, req.body);
     const practice = practiceOr404(b.practiceId);
+    assertOpen(db, u, practice.id);
     const circuit = (b.circuit ?? practice.starterCircuit) as CircuitDoc;
 
     let passed: boolean;
@@ -88,10 +92,10 @@ export function submissionRoutes(app: FastifyInstance, ctx: AppCtx) {
     const tx = db.transaction(() => {
       const already = db.prepare("SELECT 1 FROM submissions WHERE user_id = ? AND practice_id = ? AND status = 'passed' LIMIT 1").get(u.id, practice.id);
       const xp = passed && !already ? xpFor(practice, b.hintsUsed) : 0;
-      const r = db.prepare(`INSERT INTO submissions (user_id, practice_id, status, score, results, hints_used, xp, code, circuit, quiz_answers, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+      const r = db.prepare(`INSERT INTO submissions (user_id, practice_id, status, score, results, hints_used, xp, code, circuit, quiz_answers, student_comment, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
         u.id, practice.id, passed ? 'passed' : 'failed', score, JSON.stringify(results), b.hintsUsed, xp,
-        b.code, JSON.stringify(circuit), b.quizAnswers ? JSON.stringify(b.quizAnswers) : null, at.toISOString(),
+        b.code, JSON.stringify(circuit), b.quizAnswers ? JSON.stringify(b.quizAnswers) : null, b.studentComment?.trim() || null, at.toISOString(),
       );
       const newAchievements = awardAfterSubmission(db, u.id, practice, passed, b.hintsUsed, at);
       const row = db.prepare('SELECT * FROM submissions WHERE id = ?').get(r.lastInsertRowid) as SubmissionRow;

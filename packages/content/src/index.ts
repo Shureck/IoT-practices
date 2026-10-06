@@ -17,6 +17,7 @@ export function publicPractice(p: Practice) {
   return {
     ...rest,
     checks: checks.map((c) => ({ id: c.id, title: c.title })),
-    quiz: quiz?.map(({ correct: _c, explain: _e, ...q }) => q),
+    // сами правильные ответы не отдаём, но сообщаем, что их несколько (чтобы показать флажки, а не переключатель)
+    quiz: quiz?.map(({ correct, explain: _e, ...q }) => ({ ...q, multi: correct.length > 1 })),
   };
 }

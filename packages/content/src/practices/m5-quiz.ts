@@ -44,7 +44,7 @@ export const quiz5: Practice = {
     {
       id: 'hash',
       text: 'Какие из подписок поймают сообщение в топик `station/polar5/door/state`?',
-      options: ['station/#', 'station/polar5/+', 'station/+/door/#', '#'],
+      options: ['`station/#`', '`station/polar5/+`', '`station/+/door/#`', '`#`'],
       correct: [0, 2, 3],
       explain: '`#` — «сколько угодно уровней до конца», ставится только последним. `station/polar5/+` ловит лишь топики из трёх уровней, а в нашем их четыре.',
     },

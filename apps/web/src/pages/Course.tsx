@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { CheckCircle2, Clock, Sparkles, CircleDashed, XCircle, CalendarClock, Trophy } from 'lucide-react';
+import { CheckCircle2, Clock, Sparkles, CircleDashed, XCircle, CalendarClock, Trophy, Lock } from 'lucide-react';
 import { useApp } from '../store/app';
 import { Badge, Empty, Progress, Spinner } from '../components/ui';
 import { Md } from '../lib/markdown';
@@ -22,6 +22,21 @@ function PracticeCard({ p }: { p: PublicPractice }) {
   const due = progress?.assignments.find((a) => a.practiceId === p.id);
   const status = item?.status;
   const overdue = due && new Date(due.dueAt) < new Date() && status !== 'passed';
+  const locked = useApp((s) => s.isLocked(p.id));
+  if (locked) {
+    return (
+      <div className="relative flex flex-col rounded-xl border border-dashed border-line bg-panel/50 p-3.5 opacity-70" title="Практику откроет преподаватель">
+        <div className="mb-2 flex items-center gap-1.5">
+          <Badge tone={KIND_LABEL[p.kind].tone}>{KIND_LABEL[p.kind].label}</Badge>
+          <span className="font-mono text-[10px] tracking-widest text-faint">{DIFF[p.difficulty]}</span>
+          <Lock size={15} className="ml-auto text-faint" />
+        </div>
+        <div className="font-semibold leading-snug text-muted">{p.title}</div>
+        <div className="mt-0.5 line-clamp-2 text-[12.5px] text-faint">{p.subtitle}</div>
+        <div className="mt-auto pt-3 text-[11.5px] text-faint">Откроет преподаватель</div>
+      </div>
+    );
+  }
   return (
     <Link to={`/p/${p.id}`} className={`focus-ring group relative flex flex-col rounded-xl border bg-panel p-3.5 transition hover:-translate-y-0.5 hover:shadow-lg ${status === 'passed' ? 'border-ok/35' : 'border-line hover:border-line-strong'}`}>
       <div className="mb-2 flex items-center gap-1.5">

@@ -2,7 +2,8 @@
 import { useEffect, useMemo, useRef } from 'react';
 import CodeMirror, { type ReactCodeMirrorRef } from '@uiw/react-codemirror';
 import { cpp } from '@codemirror/lang-cpp';
-import { autocompletion, type CompletionContext, type Completion } from '@codemirror/autocomplete';
+import { acceptCompletion, autocompletion, type CompletionContext, type Completion } from '@codemirror/autocomplete';
+import { Prec } from '@codemirror/state';
 import { linter, lintGutter, type Diagnostic } from '@codemirror/lint';
 import { EditorView, keymap } from '@codemirror/view';
 import { HighlightStyle, syntaxHighlighting, indentUnit } from '@codemirror/language';
@@ -84,6 +85,37 @@ function memberCompletions(code: string, obj: string): Completion[] {
   return Object.entries(meta.methods).map(([m, r]) => ({ label: m, type: 'method', detail: r.replace(/[*~]/g, ''), info: API_DOCS[`${cls}.${m}`]?.text, apply: `${m}(` }));
 }
 
+const KNOWN = new Set(ALL.map((c) => c.label));
+const TYPE_RE = String.raw`(?:(?:const|static|volatile|unsigned|signed|long|short|struct)\s+)*(?:int|float|double|bool|boolean|char|byte|long|short|word|String|size_t|u?int(?:8|16|32|64)_t|unsigned|void|auto|[A-Z]\w*)`;
+
+/** Имена из кода ученика: переменные, константы, функции, #define, значения enum; остальные слова — ниже. */
+function userCompletions(code: string, exclude: string): Completion[] {
+  const src = code.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/\/\/.*$/gm, ' ').replace(/"(?:\\.|[^"\\])*"/g, '""');
+  const found = new Map<string, Completion>();
+  const add = (label: string, type: string, detail?: string, apply?: string) => {
+    if (label === exclude || label.length < 2 || found.has(label)) return;
+    found.set(label, { label, type, detail, apply, boost: 5 });
+  };
+  // объявления: «тип имя(» — функция, «тип имя = / ; / [ / ,» — переменная (и списки «int a, b»)
+  const decl = new RegExp(`\\b(${TYPE_RE})\\s*[*&]?\\s+([A-Za-z_]\\w*)\\s*(\\(|=|;|\\[|,|\\))`, 'g');
+  for (let m; (m = decl.exec(src)); ) {
+    const ty = m[1].replace(/\s+/g, ' ');
+    if (m[3] === '(') add(m[2], 'function', `${ty}(…)`, `${m[2]}(`);
+    else add(m[2], /\bconst\b/.test(ty) ? 'constant' : 'variable', ty);
+  }
+  for (const m of src.matchAll(/^\s*#define\s+([A-Za-z_]\w*)/gm)) add(m[1], 'constant', '#define');
+  for (const m of src.matchAll(/\benum\s*(?:class\s+)?\w*\s*\{([^}]*)\}/g)) {
+    for (const item of m[1].split(',')) { const n = item.trim().split(/\s|=/)[0]; if (/^[A-Za-z_]\w*$/.test(n)) add(n, 'enum'); }
+  }
+  // прочие слова из кода (например, параметры функций) — после объявлений
+  for (const m of src.matchAll(/\b[A-Za-z_]\w{2,}\b/g)) {
+    const w = m[0];
+    if (w === exclude || found.has(w) || KNOWN.has(w)) continue;
+    found.set(w, { label: w, type: 'text', boost: 1 });
+  }
+  return [...found.values()];
+}
+
 function complete(ctx: CompletionContext) {
   const member = ctx.matchBefore(/[A-Za-z_]\w*\.\w*/);
   if (member) {
@@ -94,7 +126,9 @@ function complete(ctx: CompletionContext) {
   }
   const word = ctx.matchBefore(/[#A-Za-z_]\w*/);
   if (!word || (word.from === word.to && !ctx.explicit)) return null;
-  return { from: word.from, options: ALL, validFor: /^[#\w]*$/ };
+  // слово под курсором не подсказываем само себе (иначе недописанное имя попадает в список)
+  const at = ctx.state.doc.sliceString(word.from, ctx.state.wordAt(ctx.pos)?.to ?? ctx.pos);
+  return { from: word.from, options: [...userCompletions(ctx.state.doc.toString(), at), ...ALL], validFor: /^[#\w]*$/ };
 }
 
 function toCmDiagnostics(doc: { line(n: number): { from: number; to: number; length: number }; lines: number }, diags: Diag[]): Diagnostic[] {
@@ -120,6 +154,8 @@ export function CodeEditor() {
     syntaxHighlighting(highlight),
     darkTheme,
     autocompletion({ override: [complete], icons: true, activateOnTyping: true }),
+    // Tab выбирает подсказку (Enter — тоже); без открытого списка Tab работает как обычно
+    Prec.highest(keymap.of([{ key: 'Tab', run: acceptCompletion }])),
     lintGutter(),
     linter((view) => {
       const res = compileSketch(view.state.doc.toString());

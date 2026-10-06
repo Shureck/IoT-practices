@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Plus, Copy, Users, Trash2, CalendarPlus, Inbox, Grid3x3, CalendarClock, Download } from 'lucide-react';
+import { Plus, Copy, Users, Trash2, CalendarPlus, Inbox, Grid3x3, CalendarClock, Download, Lock, Unlock, MessageSquareText } from 'lucide-react';
 import { api, type Assignment, type Group, type GroupProgress, type Submission } from '../lib/api';
 import { useApp } from '../store/app';
 import { Badge, Button, Empty, Field, Modal, Spinner, Tabs, inputCls, inputBase } from '../components/ui';
@@ -12,7 +12,7 @@ export default function Teacher() {
   const [gid, setGid] = useState<number | null>(null);
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState('');
-  const [tab, setTab] = useState<'matrix' | 'queue' | 'deadlines'>('matrix');
+  const [tab, setTab] = useState<'matrix' | 'queue' | 'access' | 'deadlines'>('matrix');
 
   const reload = async () => {
     try {
@@ -58,6 +58,7 @@ export default function Teacher() {
                 <Tabs value={tab} onChange={setTab} tabs={[
                   { id: 'matrix', label: <><Grid3x3 size={14} /> Прогресс</> },
                   { id: 'queue', label: <><Inbox size={14} /> На проверку</> },
+                  { id: 'access', label: <><Unlock size={14} /> Доступ</> },
                   { id: 'deadlines', label: <><CalendarClock size={14} /> Дедлайны</> },
                 ]} />
                 <div className="ml-auto flex items-center gap-2 text-[13px]">
@@ -73,6 +74,7 @@ export default function Teacher() {
               </div>
               {tab === 'matrix' && <Matrix group={group} />}
               {tab === 'queue' && <Queue group={group} />}
+              {tab === 'access' && <Access group={group} />}
               {tab === 'deadlines' && <Deadlines group={group} />}
             </div>
           )}
@@ -180,6 +182,7 @@ function Queue({ group }: { group: Group }) {
                 <span className="w-44 truncate font-medium">{s.studentName}</span>
                 {p && <Badge tone={KIND_LABEL[p.kind].tone}>{KIND_LABEL[p.kind].label}</Badge>}
                 <span className="flex-1 truncate">{p?.title ?? s.practiceId}</span>
+                {s.studentComment && <span className="flex max-w-60 items-center gap-1 truncate text-xs text-muted" title={s.studentComment}><MessageSquareText size={13} className="shrink-0 text-accent" />{s.studentComment}</span>}
                 <Badge tone={s.status === 'passed' ? 'ok' : 'warn'}>{Math.round(s.score * 100)} %</Badge>
                 {s.grade && <Badge tone="violet">{s.grade}</Badge>}
                 <span className="text-xs text-faint">{new Date(s.createdAt).toLocaleString('ru-RU')}</span>
@@ -188,6 +191,70 @@ function Queue({ group }: { group: Group }) {
           })}
         </div>
       )}
+    </div>
+  );
+}
+
+/** Какие практики открыты группе: студенты видят закрытые с замком и не могут их сдавать. */
+function Access({ group }: { group: Group }) {
+  const catalog = useApp((s) => s.catalog);
+  const toast = useApp((s) => s.toast);
+  const [open, setOpen] = useState<Set<string> | null>(null);
+  const [saving, setSaving] = useState(false);
+  useEffect(() => { setOpen(null); api.groupAccess(group.id).then((r) => setOpen(new Set(r.open))).catch(() => setOpen(new Set())); }, [group]);
+  const save = async (next: Set<string>) => {
+    const prev = open;
+    setOpen(next);
+    setSaving(true);
+    try { setOpen(new Set((await api.setGroupAccess(group.id, [...next])).open)); }
+    catch (e) { setOpen(prev); toast({ kind: 'err', title: 'Не удалось сохранить', text: (e as Error).message }); }
+    finally { setSaving(false); }
+  };
+  if (!open || !catalog) return <div className="p-6"><Spinner /></div>;
+  const toggle = (ids: string[], on: boolean) => {
+    const next = new Set(open);
+    for (const id of ids) if (on) next.add(id); else next.delete(id);
+    void save(next);
+  };
+  return (
+    <div className="space-y-4 p-4">
+      <div className="flex flex-wrap items-center gap-2 text-[13px] text-muted">
+        Открыто практик: <b className="text-text">{open.size}</b> из {catalog.practices.length}. Закрытые студенты группы видят с замком и не могут сдавать.
+        {saving && <Spinner size={14} />}
+        <div className="ml-auto flex gap-1.5">
+          <Button size="sm" variant="ghost" icon={<Unlock size={14} />} onClick={() => toggle(catalog.practices.map((p) => p.id), true)}>Открыть всё</Button>
+          <Button size="sm" variant="ghost" icon={<Lock size={14} />} onClick={() => toggle(catalog.practices.map((p) => p.id), false)}>Закрыть всё</Button>
+        </div>
+      </div>
+      {catalog.modules.map((m) => {
+        const list = catalog.practices.filter((p) => p.module === m.id).sort((a, b) => a.order - b.order);
+        const all = list.every((p) => open.has(p.id));
+        return (
+          <div key={m.id} className="rounded-xl border border-line">
+            <div className="flex items-center gap-2 border-b border-line px-3 py-2">
+              <span className="text-lg">{m.icon}</span>
+              <span className="font-semibold">{m.title}</span>
+              <span className="text-xs text-faint">{list.filter((p) => open.has(p.id)).length}/{list.length}</span>
+              <Button size="sm" variant="ghost" className="ml-auto" icon={all ? <Lock size={14} /> : <Unlock size={14} />} onClick={() => toggle(list.map((p) => p.id), !all)}>
+                {all ? 'Закрыть модуль' : 'Открыть модуль'}
+              </Button>
+            </div>
+            <div className="divide-y divide-line">
+              {list.map((p) => {
+                const on = open.has(p.id);
+                return (
+                  <label key={p.id} className="flex cursor-pointer items-center gap-3 px-3 py-2 text-[13.5px] hover:bg-panel-2">
+                    <input type="checkbox" checked={on} onChange={(e) => toggle([p.id], e.target.checked)} />
+                    <Badge tone={KIND_LABEL[p.kind].tone}>{KIND_LABEL[p.kind].label}</Badge>
+                    <span className={`flex-1 ${on ? '' : 'text-muted'}`}>{p.title}</span>
+                    {on ? <Unlock size={14} className="text-ok" /> : <Lock size={14} className="text-faint" />}
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }

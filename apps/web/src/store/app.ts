@@ -25,6 +25,8 @@ interface AppState {
   toggleTheme(): void;
   toast(t: Omit<Toast, 'id'>): void;
   dismiss(id: number): void;
+  /** практика закрыта преподавателем для этого студента */
+  isLocked(practiceId: string): boolean;
 }
 
 let toastId = 1;
@@ -37,6 +39,10 @@ export const useApp = create<AppState>((set, get) => ({
   progress: null,
   theme: document.documentElement.dataset.theme === 'light' ? 'light' : 'dark',
   toasts: [],
+  isLocked(practiceId) {
+    const { user, progress } = get();
+    return !!(user?.role === 'student' && progress?.open && !progress.open.includes(practiceId));
+  },
   async loadUser() {
     try {
       const { user } = await api.me();

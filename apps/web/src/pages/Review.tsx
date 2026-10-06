@@ -69,6 +69,12 @@ export default function Review() {
           <Button size="sm" variant="primary" icon={<MessageSquare size={14} />} onClick={() => setOpen(true)}>{sub.grade ? `Оценка: ${sub.grade}` : 'Оценить'}</Button>
         </div>
       </div>
+      {sub.studentComment && (
+        <div className="flex items-start gap-2 border-b border-line bg-accent/5 px-3 py-2 text-[13px]">
+          <span className="shrink-0 font-medium text-accent">Комментарий студента:</span>
+          <span className="whitespace-pre-wrap">{sub.studentComment}</span>
+        </div>
+      )}
       <div className="flex flex-wrap gap-1.5 border-b border-line px-3 py-1.5">
         {sub.results.map((r) => (
           <span key={r.id} title={r.message} className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11.5px] ${r.ok ? 'bg-ok/10 text-ok' : 'bg-err/10 text-err'}`}>

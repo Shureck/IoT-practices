@@ -8,6 +8,7 @@ import { getPractice } from '../grading';
 import { IdParam, SUMMARY_COLS, submissionFull, submissionView, type SubmissionRow } from './common';
 import { assignmentView, progressOf } from './progress';
 import { nowIso, type DB } from '../db';
+import { DEFAULT_OPEN, openForGroup, setOpenForGroup } from '../access';
 
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 
@@ -29,6 +30,7 @@ const AssignmentBody = z.object({
   practiceId: z.string({ required_error: 'Не указана практика' }).max(100),
   dueAt: z.string({ required_error: 'Укажите срок сдачи' }).refine((s) => !Number.isNaN(Date.parse(s)), 'Некорректная дата срока сдачи'),
 });
+const AccessBody = z.object({ open: z.array(z.string().max(100)).max(500) });
 const SubQuery = z.object({
   groupId: z.coerce.number().int().positive().optional(),
   practiceId: z.string().max(100).optional(),
@@ -71,7 +73,27 @@ export function teacherRoutes(app: FastifyInstance, ctx: AppCtx) {
     const count = (db.prepare('SELECT COUNT(*) AS n FROM groups WHERE teacher_id = ?').get(t.id) as { n: number }).n;
     if (count >= 100) throw badRequest('Слишком много групп');
     const r = db.prepare('INSERT INTO groups (name, join_code, teacher_id, created_at) VALUES (?, ?, ?, ?)').run(b.name, newJoinCode(db), t.id, nowIso());
+    setOpenForGroup(db, Number(r.lastInsertRowid), DEFAULT_OPEN);
     return { group: groupView(ownGroup(t.id, Number(r.lastInsertRowid))) };
+  });
+
+  // доступ к практикам: какие практики открыты группе
+  app.get('/api/teacher/groups/:id/access', async (req) => {
+    const t = requireTeacher(req);
+    const { id } = parse(IdParam, req.params);
+    ownGroup(t.id, id);
+    return { open: openForGroup(db, id) };
+  });
+
+  app.put('/api/teacher/groups/:id/access', async (req) => {
+    const t = requireTeacher(req);
+    const { id } = parse(IdParam, req.params);
+    ownGroup(t.id, id);
+    const b = parse(AccessBody, req.body);
+    const unknown = b.open.filter((p) => !getPractice(p));
+    if (unknown.length) throw badRequest(`Неизвестные практики: ${unknown.join(', ')}`);
+    setOpenForGroup(db, id, b.open);
+    return { open: openForGroup(db, id) };
   });
 
   app.delete('/api/teacher/groups/:id', async (req) => {

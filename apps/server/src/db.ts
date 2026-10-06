@@ -1,6 +1,7 @@
 // SQLite: схема и миграции (PRAGMA user_version).
 import path from 'node:path';
 import Database from 'better-sqlite3';
+import { DEFAULT_OPEN } from './access';
 
 export type DB = Database.Database;
 
@@ -101,6 +102,16 @@ const MIGRATIONS: string[] = [
     time TEXT NOT NULL
   );
   CREATE INDEX idx_telemetry_room ON telemetry(room, id);
+  `,
+  // 2 — комментарий студента к сдаче; доступ к практикам по группам (существующим группам — первые 4 практики)
+  `
+  ALTER TABLE submissions ADD COLUMN student_comment TEXT;
+  CREATE TABLE group_practices (
+    group_id INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+    practice_id TEXT NOT NULL,
+    PRIMARY KEY (group_id, practice_id)
+  );
+  ${DEFAULT_OPEN.map((id) => `INSERT INTO group_practices (group_id, practice_id) SELECT id, '${id}' FROM groups;`).join('\n  ')}
   `,
 ];
 

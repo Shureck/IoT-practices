@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, CheckCheck, Send, History, RotateCcw, ChevronLeft, ChevronRight, CheckCircle2, XCircle } from 'lucide-react';
+import { ArrowLeft, Check, CheckCheck, Send, History, RotateCcw, ChevronLeft, ChevronRight, CheckCircle2, XCircle } from 'lucide-react';
 import type { CircuitDoc } from '@esp32lab/sim';
 import { useApp, storage } from '../store/app';
 import { api, type PublicPractice, type Submission } from '../lib/api';
@@ -20,6 +20,7 @@ export default function PracticePage() {
   const userId = user?.id ?? null;
   const userLoaded = useApp((s) => s.userLoaded);
   const practice = catalog?.practices.find((p) => p.id === id);
+  const locked = useApp((s) => s.isLocked(id));
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
@@ -39,11 +40,19 @@ export default function PracticePage() {
       }
       if (cancelled) return;
       stopSim();
-      useWB.getState().init({
-        mode: 'practice', practice, title: practice.title, code, circuit,
+      const base = {
+        mode: 'practice' as const, practice, title: practice.title,
         circuitLocked: !!practice.circuitLocked, palette: practice.palette ?? null,
         hintsUsed: storage.get(`hints:${practice.id}`, 0),
-      });
+      };
+      try {
+        useWB.getState().init({ ...base, code, circuit });
+      } catch (e) {
+        // черновик повреждён — открываем заготовку, а черновик оставляем как есть (его можно вернуть через «Попытки»)
+        console.error('draft load failed', e);
+        useWB.getState().init({ ...base, code: practice.starterCode, circuit: practice.starterCircuit });
+        useApp.getState().toast({ kind: 'err', title: 'Черновик не открылся', text: 'Загружена исходная заготовка задания.' });
+      }
       setReady(true);
     })();
     return () => { cancelled = true; };
@@ -85,6 +94,12 @@ export default function PracticePage() {
 
   if (!catalog) return <div className="flex h-full items-center justify-center"><Spinner /></div>;
   if (!practice) return <Empty icon="🧭" title="Практика не найдена" action={<Link className="text-accent hover:underline" to="/course">К курсу</Link>} />;
+  if (locked) {
+    return (
+      <Empty icon="🔒" title="Практика пока закрыта" text="Её откроет преподаватель. А пока можно повторить открытые практики или поэкспериментировать в песочнице."
+        action={<Link className="text-accent hover:underline" to="/course">К курсу</Link>} />
+    );
+  }
   if (practice.kind === 'quiz') return <QuizView practice={practice} />;
   if (!ready) return <div className="flex h-full items-center justify-center"><Spinner /></div>;
   return <PracticeWorkbench practice={practice} />;
@@ -113,6 +128,8 @@ function PracticeWorkbench({ practice }: { practice: PublicPractice }) {
   const [submitting, setSubmitting] = useState(false);
   const [history, setHistory] = useState<Submission[] | null>(null);
   const [confirmReset, setConfirmReset] = useState(false);
+  const [submitOpen, setSubmitOpen] = useState(false);
+  const [studentComment, setStudentComment] = useState('');
   const checking = useWB((s) => s.checking);
 
   const needLogin = () => {
@@ -147,7 +164,9 @@ function PracticeWorkbench({ practice }: { practice: PublicPractice }) {
     setSubmitting(true);
     s.set({ checking: true });
     try {
-      const r = await api.submit({ practiceId: practice.id, code: s.code, circuit: s.circuit, hintsUsed: s.hintsUsed });
+      const r = await api.submit({ practiceId: practice.id, code: s.code, circuit: s.circuit, hintsUsed: s.hintsUsed, studentComment: studentComment.trim() || undefined });
+      setSubmitOpen(false);
+      setStudentComment('');
       s.set({ checkResults: r.submission.results });
       if (r.submission.status === 'passed') {
         toast({ kind: 'ok', title: 'Работа сдана! 🎉', text: r.xpGained ? `+${r.xpGained} XP` : 'Засчитано (опыт уже был получен ранее).' });
@@ -191,10 +210,20 @@ function PracticeWorkbench({ practice }: { practice: PublicPractice }) {
             <Button variant="ghost" size="sm" icon={<RotateCcw size={14} />} onClick={() => setConfirmReset(true)} className="max-lg:hidden">Сначала</Button>
             {user && <Button variant="ghost" size="sm" icon={<History size={14} />} onClick={() => void openHistory()} className="max-lg:hidden">Попытки</Button>}
             <Button icon={<CheckCheck size={15} />} loading={checking && !submitting} onClick={() => void check()}>Проверить</Button>
-            <Button variant="ok" icon={<Send size={14} />} loading={submitting} onClick={() => void submit()}>Сдать</Button>
+            <Button variant="ok" icon={<Send size={14} />} loading={submitting} onClick={() => (user ? setSubmitOpen(true) : needLogin())}>Сдать</Button>
           </>
         )}
       />
+      <Modal open={submitOpen} onClose={() => !submitting && setSubmitOpen(false)} title="Сдать работу"
+        footer={<><Button onClick={() => setSubmitOpen(false)} disabled={submitting}>Отмена</Button><Button variant="ok" icon={<Send size={14} />} loading={submitting} onClick={() => void submit()}>Сдать</Button></>}>
+        <div className="space-y-2 text-sm">
+          <p className="text-muted">Код и схема будут проверены автоматически и попадут преподавателю.</p>
+          <label className="block text-[13px] font-medium" htmlFor="student-comment">Комментарий преподавателю <span className="font-normal text-faint">(необязательно)</span></label>
+          <textarea id="student-comment" value={studentComment} onChange={(e) => setStudentComment(e.target.value)} maxLength={2000} rows={4}
+            placeholder="Например: что получилось, что не удалось, какой вопрос остался…"
+            className="w-full resize-y rounded-lg border border-line bg-bg-2 p-2.5 text-sm outline-none focus:border-accent" />
+        </div>
+      </Modal>
       <Modal open={confirmReset} onClose={() => setConfirmReset(false)} title="Начать заново?" footer={<><Button onClick={() => setConfirmReset(false)}>Отмена</Button><Button variant="danger" onClick={reset}>Сбросить</Button></>}>
         Код и схема вернутся к исходным. Сданные попытки сохранятся.
       </Modal>
@@ -207,7 +236,8 @@ function PracticeWorkbench({ practice }: { practice: PublicPractice }) {
                 <span className="text-muted">{new Date(h.createdAt).toLocaleString('ru-RU')}</span>
                 <Badge tone={h.status === 'passed' ? 'ok' : 'warn'}>{Math.round(h.score * 100)} %</Badge>
                 {h.grade && <Badge tone="violet">оценка {h.grade}</Badge>}
-                {h.comment && <span className="truncate text-xs text-muted">💬 {h.comment}</span>}
+                {h.studentComment && <span className="truncate text-xs text-faint" title={h.studentComment}>✎ {h.studentComment}</span>}
+                {h.comment && <span className="truncate text-xs text-muted" title={h.comment}>💬 {h.comment}</span>}
                 <Button size="sm" variant="ghost" className="ml-auto" onClick={async () => {
                   const full = (await api.submission(h.id)).submission;
                   if (full.code) { useWB.getState().setCode(full.code); if (full.circuit) useWB.getState().setCircuit(full.circuit); }
@@ -261,14 +291,15 @@ function QuizView({ practice }: { practice: PublicPractice }) {
                 <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-accent/15 text-xs font-bold text-accent">{qi + 1}</span>
                 <Md text={q.text} className="flex-1" />
               </div>
+              {q.multi && <div className="-mt-1 mb-2 pl-8 text-xs text-faint">Выберите все верные варианты</div>}
               {q.code && <pre className="mb-3 overflow-x-auto rounded-lg border border-line bg-[var(--code-bg)] p-3 font-mono text-[12.5px]">{q.code}</pre>}
               <div className="space-y-1.5">
                 {q.options.map((o, oi) => {
                   const chosen = answers[qi]?.includes(oi);
                   return (
-                    <button key={oi} disabled={!!result} onClick={() => toggle(qi, oi, false)}
+                    <button key={oi} disabled={!!result} onClick={() => toggle(qi, oi, !!q.multi)} role={q.multi ? 'checkbox' : 'radio'} aria-checked={!!chosen}
                       className={`flex w-full items-start gap-2.5 rounded-xl border px-3 py-2 text-left text-[14px] transition ${chosen ? 'border-accent bg-accent/10' : 'border-line hover:border-line-strong'}`}>
-                      <span className={`mt-0.5 h-4 w-4 shrink-0 rounded-full border-2 ${chosen ? 'border-accent bg-accent' : 'border-line-strong'}`} />
+                      <span className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center border-2 ${q.multi ? 'rounded' : 'rounded-full'} ${chosen ? 'border-accent bg-accent text-accent-ink' : 'border-line-strong'}`}>{q.multi && chosen && <Check size={11} strokeWidth={3} />}</span>
                       <Md text={o} />
                     </button>
                   );

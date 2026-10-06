@@ -59,3 +59,12 @@ void loop() { mqtt.loop(); }`);
     expect(h.mqttLog('a/bytes')[0]?.payload).toBe('A\u0000B');
   });
 });
+
+describe('устойчивость компилятора', () => {
+  it('повторное определение setup() — ошибка компиляции, а не исключение', () => {
+    const src = 'const int LED = 26;\nvoid setup() {\n  pinMode(LED, OUTPUT);\n}\n\nvoid setup() {\n  pinMode(LED, OUTPUT);\n}\n';
+    const r = compileSketch(src);
+    expect(r.ok).toBe(false);
+    expect(r.diagnostics.some((d) => /уже определена/.test(d.message))).toBe(true);
+  });
+});

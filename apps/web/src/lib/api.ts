@@ -15,7 +15,8 @@ export interface User {
 
 export type PublicPractice = Omit<Practice, 'solution' | 'checks' | 'quiz'> & {
   checks: { id: string; title: string }[];
-  quiz?: Omit<QuizQuestion, 'correct' | 'explain'>[];
+  /** multi — у вопроса несколько правильных ответов (флажки вместо переключателя) */
+  quiz?: (Omit<QuizQuestion, 'correct' | 'explain'> & { multi?: boolean })[];
 };
 
 export interface Catalog {
@@ -34,6 +35,8 @@ export interface Submission {
   hintsUsed: number;
   grade: number | null;
   comment: string | null;
+  /** комментарий студента, оставленный при сдаче */
+  studentComment?: string | null;
   createdAt: string;
   reviewedAt: string | null;
   code?: string;
@@ -61,6 +64,8 @@ export interface Progress {
   achievements: string[];
   items: ProgressItem[];
   assignments: Assignment[];
+  /** практики, открытые преподавателем группе; null — открыто всё */
+  open: string[] | null;
 }
 
 export interface Project {
@@ -126,7 +131,7 @@ export const api = {
   catalog: () => req<Catalog>('GET', '/api/practices'),
   check: (practiceId: string, code: string, circuit: CircuitDoc) =>
     req<{ compile: { ok: boolean; diagnostics: Diag[] }; results: CheckResult[] }>('POST', '/api/check', { practiceId, code, circuit }),
-  submit: (b: { practiceId: string; code: string; circuit: CircuitDoc; hintsUsed: number; quizAnswers?: number[][] }) =>
+  submit: (b: { practiceId: string; code: string; circuit: CircuitDoc; hintsUsed: number; quizAnswers?: number[][]; studentComment?: string }) =>
     req<{ submission: Submission; xpGained: number; newAchievements: string[] }>('POST', '/api/submissions', b),
   submissions: (practiceId?: string) => req<{ submissions: Submission[] }>('GET', `/api/submissions${practiceId ? `?practiceId=${encodeURIComponent(practiceId)}` : ''}`),
   submission: (id: number) => req<{ submission: Submission }>('GET', `/api/submissions/${id}`),
@@ -146,6 +151,8 @@ export const api = {
   groups: () => req<{ groups: Group[] }>('GET', '/api/teacher/groups'),
   createGroup: (name: string) => req<{ group: Group }>('POST', '/api/teacher/groups', { name }),
   deleteGroup: (id: number) => req<{ ok: true }>('DELETE', `/api/teacher/groups/${id}`),
+  groupAccess: (id: number) => req<{ open: string[] }>('GET', `/api/teacher/groups/${id}/access`),
+  setGroupAccess: (id: number, open: string[]) => req<{ open: string[] }>('PUT', `/api/teacher/groups/${id}/access`, { open }),
   groupProgress: (id: number) => req<GroupProgress>('GET', `/api/teacher/groups/${id}/progress`),
   teacherSubmissions: (q: { groupId?: number; practiceId?: string; studentId?: number; unreviewed?: boolean }) => {
     const p = new URLSearchParams();

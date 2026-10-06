@@ -109,12 +109,14 @@ void loop() {
   checks: [
     {
       id: 'wiring',
-      title: 'Схема собрана: светодиод через резистор на GPIO25, кнопка на GPIO14',
+      title: 'Схема собрана: светодиод через резистор и кнопка к 3V3 на выводах GPIO',
       run: async (h) => {
+        // Выводы в задании — рекомендация: другие GPIO тоже засчитываются, если код с ними совпадает
+        // (это проверяют проверки поведения ниже).
         const ledPin = checkLedWiring(h, 'led1');
-        h.expect(ledPin === 25, `Светодиод подключён к GPIO${ledPin}, а нужно к GPIO25 (вывод D25)`);
         const btnPins = [...h.gpioAt('btn', '1'), ...h.gpioAt('btn', '2')];
-        h.expect(btnPins.includes(14), 'Один вывод кнопки должен идти на GPIO14 (D14)');
+        h.expect(btnPins.length > 0, 'Один вывод кнопки подключите к выводу GPIO (в задании — D14)');
+        h.expect(!btnPins.includes(ledPin), 'Кнопка и светодиод подключены к одному и тому же GPIO — разведите их на разные выводы');
         h.expect(h.onNet('btn', '1', '3V3') || h.onNet('btn', '2', '3V3'), 'Второй вывод кнопки подключите к 3V3');
       },
     },
@@ -122,28 +124,31 @@ void loop() {
       id: 'follow',
       title: 'Светодиод горит только пока кнопка нажата',
       run: async (h) => {
-        await h.wait(200);
+        // реакцию ждём с запасом: опрос кнопки с delay() в loop() — не ошибка, просто медленнее
+        await h.wait(1500);
         h.expect(!h.ledOn('led1'), 'Светодиод горит, хотя кнопка не нажата. Включена ли подтяжка INPUT_PULLDOWN?');
         h.hold('btn', true);
-        await h.wait(100);
-        h.expect(h.ledOn('led1'), 'Нажали кнопку — светодиод не загорелся');
+        h.expect(await h.waitFor(() => h.ledOn('led1'), 1500), 'Нажали кнопку — светодиод не загорелся (ждали 1,5 с)');
+        await h.wait(300);
         h.hold('btn', false);
-        await h.wait(100);
-        h.expect(!h.ledOn('led1'), 'Отпустили кнопку — светодиод не погас');
+        h.expect(await h.waitFor(() => !h.ledOn('led1'), 1500), 'Отпустили кнопку — светодиод не погас (ждали 1,5 с)');
       },
     },
     {
       id: 'once',
       title: '«ВЫЗОВ!» печатается один раз на каждое нажатие',
       run: async (h) => {
-        gpioFor(h, 'btn', '1', 'Кнопка');
-        await h.wait(200);
+        gpioFor(h, 'btn', ['1', '2'], 'Кнопка'); // выводы кнопки равноправны
+        await h.wait(1500);
         const m = h.mark();
-        await h.press('btn', 400);
-        await h.wait(300);
-        await h.press('btn', 400);
-        await h.wait(300);
-        const calls = h.serialSince(m).split(/\r?\n/).filter((l) => l.includes('ВЫЗОВ!')).length;
+        // долгие нажатия и паузы — чтобы их «увидела» и программа, опрашивающая кнопку раз в секунду
+        await h.press('btn', 1500);
+        await h.wait(1500);
+        await h.press('btn', 1500);
+        await h.wait(1500);
+        // считаем вхождения, а не строки (Serial.print без перевода строки тоже засчитываем);
+        // регистр, пробел и «!» не важны: «Вызов», «ВЫЗОВ !» — тоже верно
+        const calls = (h.serialSince(m).match(/вызов/gi) ?? []).length;
         h.expect(calls > 0, 'При нажатии в Serial не появилось «ВЫЗОВ!»');
         h.expect(calls === 2, `За два нажатия «ВЫЗОВ!» напечатано ${calls} раз(а), а нужно ровно 2 — отслеживайте момент нажатия`);
       },

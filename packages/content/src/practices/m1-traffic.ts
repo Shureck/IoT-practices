@@ -288,8 +288,9 @@ void loop() {
         await h.wait(1000);
         const log: Snap[] = [];
         const t0 = h.now;
+        const HOLD = 300;
         h.hold('btn', true);
-        await record(h, 300, log);
+        await record(h, HOLD, log);
         h.hold('btn', false);
         await record(h, 4000, log);
         const y = log.find((s) => s.y);
@@ -298,7 +299,8 @@ void loop() {
         const pg = log.find((s) => s.pg);
         h.expect(pg, 'Через 4 с после нажатия у пешеходов так и не загорелся зелёный');
         const yLen = log.filter((s) => s.y).length * 20;
-        h.expect(Math.abs(yLen - 1000) <= 150, `Жёлтый перед красным горел ${sec(yLen)}, а нужен 1 с`);
+        // Отсчёт жёлтого и от нажатия, и от отпускания кнопки верен: допускаем 1 с + время удержания.
+        h.expect(yLen >= 1000 - 150 && yLen <= 1000 + HOLD + 150, `Жёлтый перед красным горел ${sec(yLen)}, а нужен 1 с`);
         h.expect(pg!.r && !pg!.y && !pg!.g, `Когда пешеходам загорелся зелёный, у машин горит «${carName(pg!)}» — а должен быть красный`);
         const c = conflicts(log);
         h.expect(!c, `Опасно: ${c}`);

@@ -39,9 +39,10 @@ export function expectPeriod(h: CheckContext, pin: number, from: number, to: num
 }
 
 /** Найти GPIO, к которому подключён вывод (напрямую или через резистор). */
-export function gpioFor(h: CheckContext, partId: string, pin: string, what: string): number {
-  const g = h.gpioNear(partId, pin);
-  h.expect(g.length > 0, `${what} не подключён ни к одному выводу GPIO`);
+/** GPIO, к которому подключена деталь. Для симметричных деталей (кнопка, резистор) передайте все выводы. */
+export function gpioFor(h: CheckContext, partId: string, pin: string | string[], what: string): number {
+  const g = (Array.isArray(pin) ? pin : [pin]).flatMap((x) => h.gpioNear(partId, x));
+  h.expect(g.length > 0, `${what}: нет подключения ни к одному выводу GPIO`);
   return g[0];
 }
 

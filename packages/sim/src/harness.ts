@@ -270,9 +270,17 @@ export class Harness {
         ctx = new CheckContext(code, circuit, compile, opts);
         const limit = c.timeoutMs ?? 20000;
         let timer: ReturnType<typeof setTimeout> | undefined;
+        const slow = (cx: CheckContext) => {
+          // частая причина — Serial.println в loop() без паузы: вывод растёт так быстро, что симуляция не успевает
+          const lines = cx.serialLines().length;
+          return lines > 2000
+            ? `Проверка заняла слишком много времени: программа напечатала в Serial ${lines} строк. Печатайте только при событии (например, в момент нажатия), а не на каждом проходе loop()`
+            : 'Проверка заняла слишком много времени';
+        };
+        const cx = ctx;
         await Promise.race([
-          c.run(ctx),
-          new Promise((_, rej) => { timer = setTimeout(() => rej(new CheckFail('Проверка заняла слишком много времени')), limit); }),
+          c.run(cx),
+          new Promise((_, rej) => { timer = setTimeout(() => rej(new CheckFail(slow(cx))), limit); }),
         ]).finally(() => clearTimeout(timer));
         ctx.assertAlive();
         results.push({ id: c.id, title: c.title, ok: true });

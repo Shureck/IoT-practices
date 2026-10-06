@@ -7,6 +7,7 @@ import { badRequest, notFound, parse } from '../errors';
 import { CLIENT_ACHIEVEMENTS, getPractice, grant, userAchievements } from '../grading';
 import { CircuitSchema, CodeSchema } from './common';
 import { nowIso, type DB } from '../db';
+import { openForUser } from '../access';
 
 const MAX_DRAFT = 256 * 1024;
 
@@ -84,7 +85,8 @@ export function progressRoutes(app: FastifyInstance, ctx: AppCtx) {
     const assignments = u.group_id
       ? (db.prepare('SELECT id, group_id, practice_id, due_at FROM assignments WHERE group_id = ? ORDER BY due_at').all(u.group_id) as Parameters<typeof assignmentView>[0][]).map(assignmentView)
       : [];
-    return { xp: userXp(db, u.id), achievements: userAchievements(db, u.id), items, assignments };
+    // open: открытые преподавателем практики (null — открыто всё)
+    return { xp: userXp(db, u.id), achievements: userAchievements(db, u.id), items, assignments, open: openForUser(db, u) };
   });
 
   app.post<{ Params: { id: string } }>('/api/achievements/:id', { config: perUser(30) }, async (req) => {
