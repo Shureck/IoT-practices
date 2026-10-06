@@ -31,7 +31,7 @@ export function compileRoutes(app: FastifyInstance, ctx: AppCtx) {
     return healthPending;
   }
 
-  app.get('/api/health', async () => ({ ok: true, compiler: await compilerAvailable(), version: APP_VERSION }));
+  app.get('/api/health', async () => ({ ok: true, compiler: await compilerAvailable(), ai: !!ctx.llm, version: APP_VERSION }));
 
   app.post('/api/compile', { config: perUser(10) }, async (req) => {
     const u = requireUser(req);

@@ -23,6 +23,10 @@ services:
       TRUST_PROXY: ${TRUST_PROXY:-0}
       CHECK_WORKERS: ${CHECK_WORKERS:-}
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      AI_API_KEY: ${AI_API_KEY:-}
+      AI_FOLDER: ${AI_FOLDER:-}
+      AI_MODEL: ${AI_MODEL:-}
+      AI_BASE_URL: ${AI_BASE_URL:-}
     volumes:
       - app-data:/data
     depends_on:

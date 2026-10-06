@@ -21,6 +21,11 @@ export interface Config {
   checkWorkers: number;
   checkTimeoutMs: number;
   logLevel: string;
+  /** ИИ-разбор ошибок: ключ API и каталог Yandex Cloud (без них функция выключена) */
+  aiApiKey: string | null;
+  aiFolder: string | null;
+  aiModel: string;
+  aiBaseUrl: string;
 }
 
 const truthy = (v: string | undefined) => !!v && ['1', 'true', 'yes', 'on'].includes(v.toLowerCase());
@@ -65,6 +70,10 @@ export function loadConfig(rawEnv: NodeJS.ProcessEnv = process.env, overrides: P
     checkWorkers: Number(env.CHECK_WORKERS ?? Math.max(1, Math.min(4, cpus - 1))),
     checkTimeoutMs: Number(env.CHECK_TIMEOUT_MS ?? 60_000),
     logLevel: env.LOG_LEVEL ?? 'info',
+    aiApiKey: env.AI_API_KEY ?? null,
+    aiFolder: env.AI_FOLDER ?? null,
+    aiModel: env.AI_MODEL ?? 'qwen3.6-35b-a3b/latest',
+    aiBaseUrl: (env.AI_BASE_URL ?? 'https://ai.api.cloud.yandex.net/v1').replace(/\/+$/, ''),
   };
   return { ...cfg, ...overrides };
 }

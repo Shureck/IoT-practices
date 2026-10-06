@@ -47,6 +47,8 @@ export interface WBState {
   // проверки и сдача
   checkResults: CheckResult[] | null;
   checking: boolean;
+  /** ИИ-разбор последней неудачной сдачи */
+  aiHelp: { status: 'idle' | 'loading' | 'ready' | 'error' | 'off'; text?: string; submissionId?: number };
   hintsUsed: number;
   quizAnswers: number[][];
   bottomTab: BottomTab;
@@ -117,6 +119,7 @@ export const useWB = create<WBState>((set, get) => ({
   netLog: [],
   checkResults: null,
   checking: false,
+  aiHelp: { status: 'idle' },
   hintsUsed: 0,
   quizAnswers: [],
   bottomTab: 'serial',
@@ -128,7 +131,7 @@ export const useWB = create<WBState>((set, get) => ({
   init(p) {
     set({
       sel: null, draft: null, undo: [], redo: [], running: false, paused: false, simTime: 0, serial: [], serialRev: 0,
-      warnings: [], panic: null, views: {}, netLog: [], checkResults: null, checking: false, hintsUsed: 0, quizAnswers: [],
+      warnings: [], panic: null, views: {}, netLog: [], checkResults: null, checking: false, aiHelp: { status: 'idle' }, hintsUsed: 0, quizAnswers: [],
       dirty: false, diagnostics: [], compileOk: true, status: 'idle', readOnly: false, circuitLocked: false, palette: null,
       practice: null, title: '', ...p, loadSeq: get().loadSeq + 1,
     });

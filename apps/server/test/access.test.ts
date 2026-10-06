@@ -79,7 +79,7 @@ describe('миграция 2', () => {
     db.prepare("INSERT INTO users (name, email, pass_hash, role, created_at) VALUES ('t', 't@x', 'h', 'teacher', 'now')").run();
     db.prepare("INSERT INTO groups (name, join_code, teacher_id, created_at) VALUES ('g', 'ABCDEF', 1, 'now')").run();
     // откатываем версию и повторяем миграцию 2 на «старой» базе
-    db.exec('DROP TABLE group_practices; ALTER TABLE submissions DROP COLUMN student_comment;');
+    db.exec('DROP TABLE group_practices; ALTER TABLE submissions DROP COLUMN student_comment; ALTER TABLE submissions DROP COLUMN ai_feedback;');
     db.pragma('user_version = 1');
     migrate(db);
     const rows = db.prepare('SELECT practice_id FROM group_practices ORDER BY practice_id').all() as { practice_id: string }[];

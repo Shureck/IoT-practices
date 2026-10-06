@@ -1,6 +1,6 @@
 // Левая панель практики: сюжет, цели, теория, подсказки, результаты проверок.
 import { useState } from 'react';
-import { CheckCircle2, Circle, XCircle, Lightbulb, BookOpen, Target, Clock, Sparkles } from 'lucide-react';
+import { CheckCircle2, Circle, XCircle, Lightbulb, BookOpen, Target, Clock, Sparkles, Bot } from 'lucide-react';
 import { useWB } from './store';
 import { Md, MdInline } from '../lib/markdown';
 import { Badge, Button, Tabs } from '../components/ui';
@@ -87,6 +87,7 @@ export function TaskPanel() {
                     );
                   })}
                 </ul>
+                <AiHelpBlock />
                 {item?.comment && (
                   <div className="mt-3 rounded-lg border border-accent-2/40 bg-accent-2/8 p-2.5 text-[13px]">
                     <div className="mb-0.5 text-[11px] font-semibold text-accent-2">Комментарий преподавателя{item.grade ? ` · оценка ${item.grade}` : ''}</div>
@@ -117,6 +118,32 @@ export function TaskPanel() {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+/** Разбор неудачной сдачи от языковой модели: что не так в алгоритме и что исправить. */
+function AiHelpBlock() {
+  const help = useWB((s) => s.aiHelp);
+  if (help.status === 'idle' || help.status === 'off') return null;
+  return (
+    <div className="mt-3 rounded-lg border border-accent/35 bg-accent/6 p-2.5 text-[13px]">
+      <div className="mb-1 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-accent">
+        <Bot size={13} /> Разбор от ИИ-помощника
+      </div>
+      {help.status === 'loading' && (
+        <div className="flex items-center gap-2 text-muted">
+          <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-accent border-t-transparent" />
+          Смотрю код и результаты проверок…
+        </div>
+      )}
+      {help.status === 'error' && <div className="text-muted">{help.text}</div>}
+      {help.status === 'ready' && (
+        <>
+          <Md text={help.text ?? ''} className="md text-[13px]" />
+          <div className="mt-1.5 text-[11px] text-faint">Это подсказка нейросети — она может ошибаться. Сверяйтесь с сообщениями проверок.</div>
+        </>
+      )}
     </div>
   );
 }

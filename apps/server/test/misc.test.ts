@@ -118,7 +118,7 @@ describe('сеть симулятора', () => {
 describe('компиляция и здоровье', () => {
   it('сервис недоступен → 503, затем доступен', async () => {
     const h = await a.get('/api/health');
-    expect(h.body).toEqual({ ok: true, compiler: false, version: expect.any(String) });
+    expect(h.body).toEqual({ ok: true, compiler: false, ai: expect.any(Boolean), version: expect.any(String) });
     const r = await a.post('/api/compile', { code: 'void setup(){} void loop(){}' });
     expect(r.status).toBe(503);
     expect(r.body).toEqual({ error: 'Сервис компиляции недоступен' });

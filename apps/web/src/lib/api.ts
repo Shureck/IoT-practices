@@ -37,6 +37,8 @@ export interface Submission {
   comment: string | null;
   /** комментарий студента, оставленный при сдаче */
   studentComment?: string | null;
+  /** разбор ошибок от ИИ-помощника (если запрашивался) */
+  aiFeedback?: string | null;
   createdAt: string;
   reviewedAt: string | null;
   code?: string;
@@ -135,6 +137,7 @@ export const api = {
     req<{ submission: Submission; xpGained: number; newAchievements: string[] }>('POST', '/api/submissions', b),
   submissions: (practiceId?: string) => req<{ submissions: Submission[] }>('GET', `/api/submissions${practiceId ? `?practiceId=${encodeURIComponent(practiceId)}` : ''}`),
   submission: (id: number) => req<{ submission: Submission }>('GET', `/api/submissions/${id}`),
+  explain: (id: number) => req<{ text: string }>('POST', `/api/submissions/${id}/explain`),
   draft: (practiceId: string) => req<{ code: string; circuit: CircuitDoc; updatedAt: string }>('GET', `/api/drafts/${encodeURIComponent(practiceId)}`),
   saveDraft: (practiceId: string, code: string, circuit: CircuitDoc) => req<{ ok: true }>('PUT', `/api/drafts/${encodeURIComponent(practiceId)}`, { code, circuit }),
   progress: () => req<Progress>('GET', '/api/progress'),

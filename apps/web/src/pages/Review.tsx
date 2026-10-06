@@ -1,7 +1,8 @@
 // Просмотр сданной работы преподавателем: верстак только для чтения + оценка.
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { ArrowLeft, CheckCircle2, XCircle, Eye, MessageSquare } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, XCircle, Eye, MessageSquare, Bot } from 'lucide-react';
+import { Md } from '../lib/markdown';
 import { api, type Submission } from '../lib/api';
 import { useApp } from '../store/app';
 import { useWB } from '../workbench/store';
@@ -18,12 +19,14 @@ export default function Review() {
   const [comment, setComment] = useState('');
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [ai, setAi] = useState<{ loading: boolean; text: string | null; open: boolean }>({ loading: false, text: null, open: false });
 
   useEffect(() => {
     void api.teacherSubmission(Number(id)).then(({ submission }) => {
       setSub(submission);
       setGrade(submission.grade);
       setComment(submission.comment ?? '');
+      setAi({ loading: false, text: submission.aiFeedback ?? null, open: false });
       const practice = useApp.getState().catalog?.practices.find((p) => p.id === submission.practiceId) ?? null;
       stopSim();
       useWB.getState().init({
@@ -47,6 +50,18 @@ export default function Review() {
     } catch (e) { toast({ kind: 'err', title: 'Ошибка', text: (e as Error).message }); } finally { setSaving(false); }
   };
 
+  const askAi = async () => {
+    if (ai.text) { setAi({ ...ai, open: !ai.open }); return; }
+    setAi({ ...ai, loading: true, open: true });
+    try {
+      const { text } = await api.explain(sub.id);
+      setAi({ loading: false, text, open: true });
+    } catch (e) {
+      setAi({ loading: false, text: null, open: false });
+      toast({ kind: 'err', title: 'Разбор недоступен', text: (e as Error).message });
+    }
+  };
+
   const showSolution = async () => {
     try {
       const s = await api.solution(sub.practiceId);
@@ -65,10 +80,21 @@ export default function Review() {
         {sub.hintsUsed > 0 && <Badge>подсказок: {sub.hintsUsed}</Badge>}
         <span className="text-xs text-faint">{new Date(sub.createdAt).toLocaleString('ru-RU')}</span>
         <div className="ml-auto flex gap-1.5">
+          {sub.status === 'failed' && (
+            <Button size="sm" variant="ghost" icon={<Bot size={14} />} loading={ai.loading} onClick={() => void askAi()}>
+              {ai.text ? (ai.open ? 'Скрыть разбор ИИ' : 'Разбор ИИ') : 'Разбор ИИ'}
+            </Button>
+          )}
           <Button size="sm" variant="ghost" icon={<Eye size={14} />} onClick={() => void showSolution()}>Эталон</Button>
           <Button size="sm" variant="primary" icon={<MessageSquare size={14} />} onClick={() => setOpen(true)}>{sub.grade ? `Оценка: ${sub.grade}` : 'Оценить'}</Button>
         </div>
       </div>
+      {ai.open && ai.text && (
+        <div className="max-h-64 overflow-y-auto border-b border-line bg-accent/5 px-3 py-2 text-[13px]">
+          <div className="mb-1 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-accent"><Bot size={13} /> Разбор ИИ-помощника</div>
+          <Md text={ai.text} className="md text-[13px]" />
+        </div>
+      )}
       {sub.studentComment && (
         <div className="flex items-start gap-2 border-b border-line bg-accent/5 px-3 py-2 text-[13px]">
           <span className="shrink-0 font-medium text-accent">Комментарий студента:</span>

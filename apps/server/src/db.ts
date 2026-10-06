@@ -113,6 +113,8 @@ const MIGRATIONS: string[] = [
   );
   ${DEFAULT_OPEN.map((id) => `INSERT INTO group_practices (group_id, practice_id) SELECT id, '${id}' FROM groups;`).join('\n  ')}
   `,
+  // 3 — ИИ-разбор неудачной сдачи (кэш ответа модели)
+  'ALTER TABLE submissions ADD COLUMN ai_feedback TEXT;',
 ];
 
 export function openDb(dataDir: string): DB {

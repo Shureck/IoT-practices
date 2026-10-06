@@ -9,6 +9,7 @@ import { requireUser } from '../auth';
 import { HttpError, badRequest, forbidden, notFound, parse } from '../errors';
 import { awardAfterSubmission, getPractice, gradeQuiz, xpFor, type ResultItem } from '../grading';
 import { CheckTimeout, PoolBusy } from '../pool';
+import { cleanAnswer, explainPrompt } from '../ai';
 import { CircuitSchema, CodeSchema, IdParam, SUMMARY_COLS, submissionFull, submissionView, type SubmissionRow } from './common';
 
 const CheckBody = z.object({
@@ -125,6 +126,44 @@ export function submissionRoutes(app: FastifyInstance, ctx: AppCtx) {
       if (!ok) throw forbidden('Нет доступа к этой сдаче');
     }
     return { submission: submissionFull(row) };
+  });
+
+  // ИИ-разбор неудачной сдачи: что не так в алгоритме/схеме. Ответ кэшируется в сдаче.
+  const inFlight = new Map<number, Promise<string>>();
+  app.post('/api/submissions/:id/explain', { config: perUser(10) }, async (req) => {
+    const u = requireUser(req);
+    const { id } = parse(IdParam, req.params);
+    const row = db.prepare('SELECT * FROM submissions WHERE id = ?').get(id) as SubmissionRow | undefined;
+    if (!row) throw notFound('Сдача не найдена');
+    if (row.user_id !== u.id) {
+      const ok = u.role === 'teacher' && db.prepare(
+        'SELECT 1 FROM users st JOIN groups g ON g.id = st.group_id WHERE st.id = ? AND g.teacher_id = ?',
+      ).get(row.user_id, u.id);
+      if (!ok) throw forbidden('Нет доступа к этой сдаче');
+    }
+    if (row.ai_feedback) return { text: row.ai_feedback };
+    const practice = practiceOr404(row.practice_id);
+    if (practice.kind === 'quiz') throw badRequest('Для тестов разбор не нужен — пояснения показываются к каждому вопросу');
+    if (row.status === 'passed') throw badRequest('Все проверки пройдены — разбирать нечего');
+    if (!ctx.llm) throw new HttpError(503, 'ИИ-помощник не настроен на этом сервере');
+    const llm = ctx.llm;
+    let job = inFlight.get(id);
+    if (!job) {
+      job = (async () => {
+        const prompt = explainPrompt(practice, row.code, JSON.parse(row.circuit) as CircuitDoc, JSON.parse(row.results) as ResultItem[]);
+        const text = cleanAnswer(await llm(prompt)).slice(0, 6000);
+        if (!text) throw new Error('пустой ответ модели');
+        db.prepare('UPDATE submissions SET ai_feedback = ? WHERE id = ?').run(text, id);
+        return text;
+      })().finally(() => inFlight.delete(id));
+      inFlight.set(id, job);
+    }
+    try {
+      return { text: await job };
+    } catch (e) {
+      req.log.warn({ err: (e as Error).message, submission: id }, 'ai explain failed');
+      throw new HttpError(502, 'ИИ-помощник сейчас недоступен — попробуйте позже');
+    }
   });
 }
 

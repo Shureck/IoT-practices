@@ -8,6 +8,7 @@ import fastifyStatic from '@fastify/static';
 import httpProxy from '@fastify/http-proxy';
 import type { Config } from './config';
 import type { AppCtx } from './ctx';
+import { yandexLlm, type Llm } from './ai';
 import { openDb } from './db';
 import { CheckPool } from './pool';
 import { SqliteChat } from './chat';
@@ -34,6 +35,8 @@ export interface BuildOptions {
   logger?: boolean;
   fetchExternal?: AppCtx['fetchExternal'];
   compilerFetch?: typeof fetch;
+  /** подмена языковой модели в тестах (null — выключить) */
+  llm?: Llm | null;
 }
 
 const PLACEHOLDER = `<!doctype html><html lang="ru"><head><meta charset="utf-8"><title>ESP32 Lab</title>
@@ -60,6 +63,7 @@ export async function buildApp(cfg: Config, opts: BuildOptions = {}): Promise<Fa
     chat: new SqliteChat(db),
     fetchExternal: opts.fetchExternal ?? ((r) => safeFetch(r)),
     compilerFetch: opts.compilerFetch ?? fetch,
+    llm: opts.llm !== undefined ? opts.llm : yandexLlm(cfg),
   };
   app.decorate('ctx', ctx);
   app.decorateRequest('user', null);

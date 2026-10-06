@@ -3,6 +3,7 @@ import type { DB } from './db';
 import type { CheckPool } from './pool';
 import type { SqliteChat } from './chat';
 import type { NetRequest, NetResponse } from './net';
+import type { Llm } from './ai';
 
 export interface AppCtx {
   cfg: Config;
@@ -13,6 +14,8 @@ export interface AppCtx {
   fetchExternal: (req: NetRequest) => Promise<NetResponse>;
   /** запрос к сервису компиляции (подменяется в тестах) */
   compilerFetch: typeof fetch;
+  /** языковая модель для разбора ошибок; null — не настроена */
+  llm: Llm | null;
 }
 
 /** Ограничение частоты по пользователю (или по IP, если не вошёл). */

@@ -140,7 +140,7 @@ function PracticeWorkbench({ practice }: { practice: PublicPractice }) {
   const check = useCallback(async () => {
     if (!user) return needLogin();
     const s = useWB.getState();
-    s.set({ checking: true, checkResults: null });
+    s.set({ checking: true, checkResults: null, aiHelp: { status: 'idle' } });
     try {
       const r = await api.check(practice.id, s.code, s.circuit);
       if (!r.compile.ok) {
@@ -167,6 +167,8 @@ function PracticeWorkbench({ practice }: { practice: PublicPractice }) {
       const r = await api.submit({ practiceId: practice.id, code: s.code, circuit: s.circuit, hintsUsed: s.hintsUsed, studentComment: studentComment.trim() || undefined });
       setSubmitOpen(false);
       setStudentComment('');
+      if (r.submission.status === 'failed') void explain(r.submission.id);
+      else s.set({ aiHelp: { status: 'idle' } });
       s.set({ checkResults: r.submission.results });
       if (r.submission.status === 'passed') {
         toast({ kind: 'ok', title: 'Работа сдана! 🎉', text: r.xpGained ? `+${r.xpGained} XP` : 'Засчитано (опыт уже был получен ранее).' });
@@ -185,6 +187,18 @@ function PracticeWorkbench({ practice }: { practice: PublicPractice }) {
     } finally {
       setSubmitting(false);
       useWB.getState().set({ checking: false });
+    }
+  };
+
+  // ИИ-разбор неудачной сдачи; если помощник не настроен на сервере — блок просто не показываем
+  const explain = async (id: number) => {
+    useWB.getState().set({ aiHelp: { status: 'loading', submissionId: id } });
+    try {
+      const { text } = await api.explain(id);
+      useWB.getState().set({ aiHelp: { status: 'ready', text, submissionId: id } });
+    } catch (e) {
+      const off = (e as { status?: number }).status === 503;
+      useWB.getState().set({ aiHelp: off ? { status: 'off' } : { status: 'error', text: (e as Error).message, submissionId: id } });
     }
   };
 
