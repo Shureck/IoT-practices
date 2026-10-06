@@ -167,6 +167,8 @@ export const api = {
   },
   teacherSubmission: (id: number) => req<{ submission: Submission }>('GET', `/api/teacher/submissions/${id}`),
   review: (id: number, grade: number | null, comment: string) => req<{ ok: true }>('POST', `/api/teacher/submissions/${id}/review`, { grade, comment }),
+  studentDraft: (studentId: number, practiceId: string) =>
+    req<{ studentId: number; studentName: string; practiceId: string; code: string; circuit: CircuitDoc; updatedAt: string }>('GET', `/api/teacher/students/${studentId}/drafts/${encodeURIComponent(practiceId)}`),
   solution: (practiceId: string) => req<{ code: string; circuit: CircuitDoc }>('GET', `/api/teacher/practices/${encodeURIComponent(practiceId)}/solution`),
   assignments: (groupId: number) => req<{ assignments: Assignment[] }>('GET', `/api/teacher/assignments?groupId=${groupId}`),
   createAssignment: (groupId: number, practiceId: string, dueAt: string) => req<{ assignment: Assignment }>('POST', '/api/teacher/assignments', { groupId, practiceId, dueAt }),

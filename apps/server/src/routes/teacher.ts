@@ -77,6 +77,19 @@ export function teacherRoutes(app: FastifyInstance, ctx: AppCtx) {
     return { group: groupView(ownGroup(t.id, Number(r.lastInsertRowid))) };
   });
 
+  // черновик студента (несданная работа): код и схема как сейчас в редакторе студента
+  app.get<{ Params: { studentId: string; practiceId: string } }>('/api/teacher/students/:studentId/drafts/:practiceId', async (req) => {
+    const t = requireTeacher(req);
+    const studentId = Number(req.params.studentId);
+    const st = db.prepare(`SELECT st.id, st.name FROM users st JOIN groups g ON g.id = st.group_id
+      WHERE st.id = ? AND g.teacher_id = ?`).get(studentId, t.id) as { id: number; name: string } | undefined;
+    if (!st) throw notFound('Студент не найден в ваших группах');
+    const d = db.prepare('SELECT code, circuit, updated_at FROM drafts WHERE user_id = ? AND practice_id = ?')
+      .get(st.id, req.params.practiceId) as { code: string; circuit: string; updated_at: string } | undefined;
+    if (!d) throw notFound('У студента нет черновика этой практики');
+    return { studentId: st.id, studentName: st.name, practiceId: req.params.practiceId, code: d.code, circuit: JSON.parse(d.circuit), updatedAt: d.updated_at };
+  });
+
   // доступ к практикам: какие практики открыты группе
   app.get('/api/teacher/groups/:id/access', async (req) => {
     const t = requireTeacher(req);

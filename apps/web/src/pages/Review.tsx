@@ -1,7 +1,7 @@
 // Просмотр сданной работы преподавателем: верстак только для чтения + оценка.
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { ArrowLeft, CheckCircle2, XCircle, Eye, MessageSquare, Bot } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, XCircle, Eye, MessageSquare, Bot, FilePen } from 'lucide-react';
 import { Md } from '../lib/markdown';
 import { api, type Submission } from '../lib/api';
 import { useApp } from '../store/app';
@@ -85,6 +85,7 @@ export default function Review() {
               {ai.text ? (ai.open ? 'Скрыть разбор ИИ' : 'Разбор ИИ') : 'Разбор ИИ'}
             </Button>
           )}
+          {sub.studentId && <Link to={`/review/draft/${sub.studentId}/${sub.practiceId}`} className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[13px] text-muted hover:bg-panel-2 hover:text-text" title="Что сейчас в редакторе у студента (может быть новее этой сдачи)"><FilePen size={14} />Текущий черновик</Link>}
           <Button size="sm" variant="ghost" icon={<Eye size={14} />} onClick={() => void showSolution()}>Эталон</Button>
           <Button size="sm" variant="primary" icon={<MessageSquare size={14} />} onClick={() => setOpen(true)}>{sub.grade ? `Оценка: ${sub.grade}` : 'Оценить'}</Button>
         </div>
@@ -117,6 +118,40 @@ export default function Review() {
         </div>
         <textarea className="focus-ring h-32 w-full rounded-lg border border-line bg-bg-2 p-3 text-sm outline-none" placeholder="Комментарий студенту…" value={comment} onChange={(e) => setComment(e.target.value)} />
       </Modal>
+    </div>
+  );
+}
+
+/** Черновик студента (работа ещё не сдана): просмотр кода и схемы, запуск симуляции. */
+export function DraftReview() {
+  const { studentId, practiceId } = useParams();
+  const catalog = useApp((s) => s.catalog);
+  const [info, setInfo] = useState<{ studentName: string; updatedAt: string } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const practice = catalog?.practices.find((p) => p.id === practiceId) ?? null;
+
+  useEffect(() => {
+    if (!catalog) return;
+    setInfo(null); setError(null);
+    void api.studentDraft(Number(studentId), practiceId ?? '').then((d) => {
+      setInfo({ studentName: d.studentName, updatedAt: d.updatedAt });
+      stopSim();
+      useWB.getState().init({ mode: 'review', practice, readOnly: true, title: `${d.studentName} — ${practice?.title ?? ''} (черновик)`, code: d.code, circuit: d.circuit });
+    }).catch((e) => setError((e as Error).message));
+  }, [studentId, practiceId, catalog, practice]);
+
+  if (error) return <div className="flex h-full flex-col items-center justify-center gap-3 text-sm text-muted">{error}<Link to="/teacher" className="text-accent hover:underline">В кабинет</Link></div>;
+  if (!info) return <div className="flex h-full items-center justify-center"><Spinner /></div>;
+  return (
+    <div className="flex h-full flex-col">
+      <div className="flex flex-wrap items-center gap-2 border-b border-line bg-panel-2/60 px-3 py-2 text-[13px]">
+        <Link to="/teacher" className="flex items-center gap-1 text-muted hover:text-text"><ArrowLeft size={14} /> Кабинет</Link>
+        <span className="font-semibold">{info.studentName}</span>
+        <span className="text-muted">{practice?.title}</span>
+        <Badge tone="accent">черновик — ещё не сдан</Badge>
+        <span className="text-xs text-faint">изменён {new Date(info.updatedAt).toLocaleString('ru-RU')}</span>
+      </div>
+      <div className="min-h-0 flex-1"><Workbench /></div>
     </div>
   );
 }

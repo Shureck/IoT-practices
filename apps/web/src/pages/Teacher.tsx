@@ -142,9 +142,9 @@ function Matrix({ group }: { group: Group }) {
                   const cls = !c ? 'bg-transparent text-faint' : c.status === 'passed' ? 'bg-ok/20 text-ok' : c.status === 'failed' ? 'bg-err/15 text-err' : 'bg-accent/10 text-accent';
                   return (
                     <td key={p.id} className="p-0.5 text-center">
-                      <button disabled={!c?.submissionId} onClick={() => c?.submissionId && nav(`/review/${c.submissionId}`)}
-                        className={`h-8 w-full rounded-md font-semibold transition ${cls} ${c?.submissionId ? 'hover:ring-2 hover:ring-accent/50' : ''}`}
-                        title={c ? `${c.status} · ${Math.round(c.score * 100)}% · попыток: ${c.attempts}` : 'не начато'}>
+                      <button disabled={!c} onClick={() => c && nav(c.submissionId ? `/review/${c.submissionId}` : `/review/draft/${s.id}/${p.id}`)}
+                        className={`h-8 w-full rounded-md font-semibold transition ${cls} ${c ? 'hover:ring-2 hover:ring-accent/50' : ''}`}
+                        title={c ? (c.status === 'draft' ? 'черновик — открыть код студента' : `${c.status} · ${Math.round(c.score * 100)}% · попыток: ${c.attempts}`) : 'не начато'}>
                         {c ? (c.grade ?? (c.status === 'passed' ? '✓' : c.status === 'failed' ? `${Math.round(c.score * 100)}` : '…')) : '·'}
                       </button>
                     </td>

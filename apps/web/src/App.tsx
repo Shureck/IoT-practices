@@ -12,6 +12,7 @@ const PracticePage = lazy(() => import('./pages/PracticePage'));
 const Sandbox = lazy(() => import('./pages/Sandbox'));
 const Teacher = lazy(() => import('./pages/Teacher'));
 const Review = lazy(() => import('./pages/Review'));
+const DraftReview = lazy(() => import('./pages/Review').then((m) => ({ default: m.DraftReview })));
 const Reference = lazy(() => import('./pages/Reference'));
 const Profile = lazy(() => import('./pages/Profile'));
 
@@ -117,6 +118,7 @@ function Shell() {
             <Route path="/profile" element={<RequireAuth><Profile /></RequireAuth>} />
             <Route path="/teacher" element={<RequireAuth teacher><Teacher /></RequireAuth>} />
             <Route path="/review/:id" element={<RequireAuth teacher><Review /></RequireAuth>} />
+            <Route path="/review/draft/:studentId/:practiceId" element={<RequireAuth teacher><DraftReview /></RequireAuth>} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </Suspense>

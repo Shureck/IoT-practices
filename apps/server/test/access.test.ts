@@ -88,3 +88,17 @@ describe('миграция 2', () => {
     try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* Windows */ }
   });
 });
+
+describe('черновик студента для преподавателя', () => {
+  it('свой преподаватель видит черновик, чужой — нет', async () => {
+    const s = await registered(t.app, { name: 'Черновик', groupCode: (await teacher.get('/api/teacher/groups')).body.groups[0].joinCode });
+    expect((await s.c.put('/api/drafts/m1-sos', { code: '// черновик', circuit: { parts: [], wires: [] } })).status).toBe(200);
+    const r = await teacher.get(`/api/teacher/students/${s.user.id}/drafts/m1-sos`);
+    expect(r.status).toBe(200);
+    expect(r.body).toMatchObject({ studentName: 'Черновик', practiceId: 'm1-sos', code: '// черновик' });
+    expect((await teacher.get(`/api/teacher/students/${s.user.id}/drafts/m1-blink`)).status).toBe(404);
+    const stranger = (await registered(t.app, { role: 'teacher', teacherCode: 'teach-secret', name: 'Чужой' })).c;
+    expect((await stranger.get(`/api/teacher/students/${s.user.id}/drafts/m1-sos`)).status).toBe(404);
+    expect((await s.c.get(`/api/teacher/students/${s.user.id}/drafts/m1-sos`)).status).toBe(403);
+  });
+});
