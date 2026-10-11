@@ -31,7 +31,7 @@ function Header() {
         <Logo size={26} />
         <span className="text-[15px] font-bold tracking-tight max-sm:hidden">ESP32 <span className="text-accent">Lab</span></span>
       </Link>
-      <nav className="flex items-center gap-0.5 overflow-x-auto">
+      <nav className="no-scrollbar flex items-center gap-0.5 overflow-x-auto overflow-y-hidden">
         <NavLink to="/course" className={link}>Курс</NavLink>
         <NavLink to="/sandbox" className={link}>Песочница</NavLink>
         <NavLink to="/reference" className={link}>Справочник</NavLink>

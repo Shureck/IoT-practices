@@ -83,7 +83,7 @@ export function Modal({ open, onClose, title, children, wide, footer }: { open: 
 
 export function Tabs<T extends string>({ tabs, value, onChange, className = '' }: { tabs: { id: T; label: ReactNode; badge?: ReactNode; hidden?: boolean }[]; value: T; onChange: (v: T) => void; className?: string }) {
   return (
-    <div className={`flex items-center gap-0.5 overflow-x-auto ${className}`} role="tablist">
+    <div className={`no-scrollbar flex items-center gap-0.5 overflow-x-auto overflow-y-hidden ${className}`} role="tablist">
       {tabs.filter((t) => !t.hidden).map((t) => (
         <button
           key={t.id}
@@ -94,7 +94,7 @@ export function Tabs<T extends string>({ tabs, value, onChange, className = '' }
         >
           {t.label}
           {t.badge}
-          {value === t.id && <span className="absolute inset-x-2 -bottom-[5px] h-0.5 rounded-full bg-accent" />}
+          {value === t.id && <span className="absolute inset-x-2 bottom-0 h-0.5 rounded-full bg-accent" />}
         </button>
       ))}
     </div>

@@ -55,7 +55,7 @@ export function Toolbar({ left, right }: { left?: ReactNode; right?: ReactNode }
   };
 
   return (
-    <div className="flex h-12 shrink-0 items-center gap-1.5 overflow-x-auto border-b border-line bg-panel px-2">
+    <div className="no-scrollbar flex h-12 shrink-0 items-center gap-1.5 overflow-x-auto overflow-y-hidden border-b border-line bg-panel px-2">
       {left}
       <div className="mx-1 h-6 w-px bg-line" />
       {!running ? (

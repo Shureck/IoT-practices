@@ -88,6 +88,9 @@ body {
 
 * { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
 *::-webkit-scrollbar { width: 9px; height: 9px; }
+/* строки вкладок и панели инструментов листаются колёсиком/свайпом, но без видимой полосы */
+.no-scrollbar { scrollbar-width: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }
 *::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 8px; border: 2px solid transparent; background-clip: content-box; }
 
 ::selection { background: color-mix(in srgb, var(--accent) 35%, transparent); }
