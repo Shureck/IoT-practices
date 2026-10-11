@@ -3,8 +3,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 import {
   Play, Square, RotateCcw, Pause, Volume2, VolumeX, Terminal, LineChart, Activity, Network, Radio, MessageSquare,
-  Globe, AlertCircle, Cpu, ChevronDown, ChevronUp, Download, Gauge,
-} from 'lucide-react';
+  Globe, AlertCircle, Cpu, ChevronDown, ChevronUp, Download, Gauge, Usb } from 'lucide-react';
 import { useWB, type BottomTab } from './store';
 import { CircuitEditor } from './CircuitEditor';
 import { CodeEditor } from './CodeEditor';
@@ -82,6 +81,10 @@ export function Toolbar({ left, right }: { left?: ReactNode; right?: ReactNode }
       </div>
       <div className="ml-auto flex items-center gap-1">
         <IconButton title={muted ? 'Включить звук' : 'Выключить звук'} onClick={() => set({ muted: !muted })}>{muted ? <VolumeX size={15} /> : <Volume2 size={15} />}</IconButton>
+        <button className="focus-ring flex h-8 items-center gap-1.5 rounded-lg border border-line px-2.5 text-[12.5px] font-medium text-muted transition hover:border-accent/50 hover:text-text max-sm:hidden"
+          title="Настоящая плата: прошивка по USB и монитор порта" onClick={() => set({ bottomTab: 'board', bottomOpen: true })}>
+          <Usb size={14} className="text-accent" /> ESP32
+        </button>
         <IconButton title="Скачать скетч .ino" onClick={download}><Download size={15} /></IconButton>
         <IconButton title="Экспорт схемы для Wokwi (diagram.json)" onClick={() => {
           const r = toWokwi(useWB.getState().circuit);
@@ -114,6 +117,9 @@ function BottomPanel() {
   const set = useWB((s) => s.set);
   const errs = diags.filter((d) => d.severity === 'error').length;
   const warns = diags.length - errs + warnings.length;
+  // панель настоящей платы, однажды открытая, живёт и при переключении вкладок — монитор платы не обрывается
+  const [boardSeen, setBoardSeen] = useState(false);
+  useEffect(() => { if (tab === 'board') setBoardSeen(true); }, [tab]);
   return (
     <div className="flex h-full flex-col bg-panel">
       <div className="flex items-center border-b border-line pr-1">
@@ -139,9 +145,9 @@ function BottomPanel() {
           {tab === 'chat' && <ChatPanel />}
           {tab === 'browser' && <BrowserPanel />}
           {tab === 'problems' && <ProblemsPanel />}
-          {tab === 'board' && <BoardPanel />}
         </div>
       )}
+      {boardSeen && <div className={open && tab === 'board' ? 'min-h-0 flex-1' : 'hidden'}><BoardPanel /></div>}
     </div>
   );
 }
