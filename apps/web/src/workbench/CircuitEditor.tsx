@@ -1,9 +1,10 @@
 // Редактор схемы: компоненты, провода, масштаб, взаимодействие при симуляции.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { DEFS, createRouter, pinPos, polyPath, type CircuitDoc, type Part, type PinRef, type Pt } from '@esp32lab/sim';
+import { DEFS, createRouter, pinPos, polyPath, propValue, type CircuitDoc, type Part, type PinRef, type PropDef, type Pt } from '@esp32lab/sim';
 import { Maximize2, Minus, Plus, AlertTriangle } from 'lucide-react';
 import { PartView } from './parts';
 import { Junction, WireShape } from './Wire';
+import { PropInput } from './Sidebar';
 import { useWB } from './store';
 import { modelOf, partAction, setLiveProp, syncCircuit } from './simController';
 
@@ -130,6 +131,7 @@ export function CircuitEditor() {
     if (!el) return;
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
+      if (turnKnob(e)) return;
       const r = el.getBoundingClientRect();
       const mx = e.clientX - r.left;
       const my = e.clientY - r.top;
@@ -368,6 +370,7 @@ export function CircuitEditor() {
               <g
                 key={p.id}
                 transform={`translate(${p.x},${p.y}) rotate(${p.rot})`}
+                data-pid={p.id}
                 onPointerDown={(e) => onPartDown(e, p)}
                 onPointerEnter={() => setHoverPart(p.id)}
                 onPointerLeave={() => setHoverPart((h) => (h === p.id ? null : h))}
@@ -475,7 +478,80 @@ export function CircuitEditor() {
           Чтобы проложить провод — кликните по выводу компонента, затем по выводу платы
         </div>
       )}
+      <LiveControls view={view} />
       <IssuesOverlay />
+    </div>
+  );
+}
+
+/** Первое «живое» числовое свойство детали (ручка потенциометра, освещённость, расстояние…). */
+function liveNumberProp(type: string): PropDef | undefined {
+  return DEFS[type]?.props.find((p) => p.live && p.type === 'number' && p.min !== undefined && p.max !== undefined);
+}
+
+function applyLive(id: string, key: string, v: string | number | boolean) {
+  useWB.getState().updatePart(id, (p) => ({ ...p, props: { ...p.props, [key]: v } }), false);
+  setLiveProp(id, key, v);
+}
+
+/** Колесо мыши над деталью во время симуляции крутит её ручку. Возвращает true, если событие обработано. */
+function turnKnob(e: WheelEvent): boolean {
+  const st = useWB.getState();
+  if (!st.running) return false;
+  const id = (e.target as Element | null)?.closest?.('[data-pid]')?.getAttribute('data-pid');
+  const part = id ? st.circuit.parts.find((p) => p.id === id) : undefined;
+  const pd = part && liveNumberProp(part.type);
+  if (!part || !pd) return false;
+  const cur = Number(propValue(part, pd.key));
+  const dir = e.deltaY < 0 ? 1 : -1;
+  let next = pd.log ? cur * (dir > 0 ? 1.15 : 1 / 1.15) : cur + dir * Math.max(pd.step ?? 1, (pd.max! - pd.min!) / 50);
+  next = Math.min(pd.max!, Math.max(pd.min!, next));
+  next = pd.log ? Number(next.toPrecision(3)) : Math.round(next / (pd.step ?? 1)) * (pd.step ?? 1);
+  if (next !== cur) applyLive(part.id, pd.key, Number(next.toFixed(3)));
+  if (st.sel?.kind !== 'part' || st.sel.id !== part.id) st.set({ sel: { kind: 'part', id: part.id } });
+  return true;
+}
+
+/** Панель рядом с выбранной деталью: ползунки свойств, которые меняются во время симуляции. */
+function LiveControls({ view }: { view: { x: number; y: number; k: number } }) {
+  const sel = useWB((s) => s.sel);
+  const circuit = useWB((s) => s.circuit);
+  const running = useWB((s) => s.running);
+  const [box, setBox] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
+  const measure = useCallback((el: HTMLDivElement | null) => {
+    const p = el?.parentElement;
+    if (p && (p.clientWidth !== box.w || p.clientHeight !== box.h)) setBox({ w: p.clientWidth, h: p.clientHeight });
+  }, [box.w, box.h]);
+  const part = sel?.kind === 'part' ? circuit.parts.find((p) => p.id === sel.id) : undefined;
+  const def = part ? DEFS[part.type] : undefined;
+  const live = def?.props.filter((p) => p.live) ?? [];
+  if (!part || !def || !live.length) return null;
+  const [bx, by, bw, bh] = def.box;
+  const c = [[bx, by], [bx + bw, by + bh]].map(([x, y]) => rot(x, y, part.rot, part.x, part.y));
+  const W = 256;
+  const right = Math.max(c[0][0], c[1][0]) * view.k + view.x + 10;
+  const leftSide = Math.min(c[0][0], c[1][0]) * view.k + view.x - 10 - W;
+  // справа от детали, а если не помещается — слева; и в любом случае внутри поля
+  let left = box.w && right + W > box.w - 8 && leftSide > 8 ? leftSide : right;
+  if (box.w) left = Math.max(8, Math.min(left, box.w - W - 8));
+  const top = Math.max(8, Math.min(Math.min(c[0][1], c[1][1]) * view.k + view.y, (box.h || 9999) - 160));
+  return (
+    <div ref={measure} className="absolute z-20 w-64 rounded-xl border border-accent/40 bg-panel/95 p-2.5 shadow-xl backdrop-blur" style={{ left, top }}
+      onPointerDown={(e) => e.stopPropagation()}>
+      <div className="mb-1.5 text-xs font-semibold">{def.title}</div>
+      {running ? (
+        <div className="space-y-2">
+          {live.map((pd) => (
+            <div key={pd.key}>
+              <div className="mb-0.5 text-[11px] text-muted">{pd.label}</div>
+              <PropInput def={pd} live value={propValue(part, pd.key)} onChange={(v) => applyLive(part.id, pd.key, v)} />
+            </div>
+          ))}
+          {liveNumberProp(part.type) && <div className="text-[10.5px] text-faint">Можно крутить колёсиком мыши над деталью</div>}
+        </div>
+      ) : (
+        <div className="text-[11.5px] text-muted">Нажмите «Запуск» — здесь появятся ползунки ({live.map((p) => p.label.toLowerCase()).join(', ')}), и значение можно будет менять на ходу.</div>
+      )}
     </div>
   );
 }

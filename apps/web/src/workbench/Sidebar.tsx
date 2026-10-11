@@ -59,7 +59,7 @@ export function Palette() {
   );
 }
 
-function PropInput({ def, value, onChange, live }: { def: PropDef; value: unknown; onChange: (v: string | number | boolean) => void; live: boolean }) {
+export function PropInput({ def, value, onChange, live }: { def: PropDef; value: unknown; onChange: (v: string | number | boolean) => void; live: boolean }) {
   if (def.type === 'select') {
     return (
       <select className={`${inputCls} h-8 text-xs`} value={String(value)} onChange={(e) => {
