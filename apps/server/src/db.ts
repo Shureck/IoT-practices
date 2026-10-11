@@ -115,6 +115,8 @@ const MIGRATIONS: string[] = [
   `,
   // 3 — ИИ-разбор неудачной сдачи (кэш ответа модели)
   'ALTER TABLE submissions ADD COLUMN ai_feedback TEXT;',
+  // 4 — кто запросил ИИ-разбор: 'student' (студент видел его после сдачи) или 'teacher'
+  'ALTER TABLE submissions ADD COLUMN ai_feedback_by TEXT;',
 ];
 
 export function openDb(dataDir: string): DB {

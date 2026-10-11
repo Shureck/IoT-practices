@@ -48,6 +48,8 @@ describe('ИИ-разбор ошибок', () => {
     expect(calls).toHaveLength(1);
     // разбор виден преподавателю в сдаче
     expect((await teacher.get(`/api/teacher/submissions/${id}`)).body.submission.aiFeedback).toBe(r.body.text);
+    expect((await teacher.get(`/api/teacher/submissions/${id}`)).body.submission.aiFeedbackBy).toBe('student');
+    expect(r.body.by).toBe('student');
     // чужой студент — нет доступа
     expect((await other.post(`/api/submissions/${id}/explain`)).status).toBe(403);
   });

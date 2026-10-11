@@ -141,7 +141,7 @@ export function submissionRoutes(app: FastifyInstance, ctx: AppCtx) {
       ).get(row.user_id, u.id);
       if (!ok) throw forbidden('Нет доступа к этой сдаче');
     }
-    if (row.ai_feedback) return { text: row.ai_feedback };
+    if (row.ai_feedback) return { text: row.ai_feedback, by: row.ai_feedback_by ?? null };
     const practice = practiceOr404(row.practice_id);
     if (practice.kind === 'quiz') throw badRequest('Для тестов разбор не нужен — пояснения показываются к каждому вопросу');
     if (row.status === 'passed') throw badRequest('Все проверки пройдены — разбирать нечего');
@@ -153,13 +153,15 @@ export function submissionRoutes(app: FastifyInstance, ctx: AppCtx) {
         const prompt = explainPrompt(practice, row.code, JSON.parse(row.circuit) as CircuitDoc, JSON.parse(row.results) as ResultItem[]);
         const text = cleanAnswer(await llm(prompt)).slice(0, 6000);
         if (!text) throw new Error('пустой ответ модели');
-        db.prepare('UPDATE submissions SET ai_feedback = ? WHERE id = ?').run(text, id);
+        db.prepare('UPDATE submissions SET ai_feedback = ?, ai_feedback_by = ? WHERE id = ?').run(text, row.user_id === u.id ? 'student' : 'teacher', id);
         return text;
       })().finally(() => inFlight.delete(id));
       inFlight.set(id, job);
     }
     try {
-      return { text: await job };
+      const text = await job;
+      const by = (db.prepare('SELECT ai_feedback_by FROM submissions WHERE id = ?').get(id) as { ai_feedback_by: string | null }).ai_feedback_by;
+      return { text, by };
     } catch (e) {
       req.log.warn({ err: (e as Error).message, submission: id }, 'ai explain failed');
       throw new HttpError(502, 'ИИ-помощник сейчас недоступен — попробуйте позже');

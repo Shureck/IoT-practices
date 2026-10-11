@@ -31,6 +31,7 @@ export interface SubmissionRow {
   student_comment: string | null;
   /** ИИ-разбор ошибок (если запрашивался) */
   ai_feedback?: string | null;
+  ai_feedback_by?: 'student' | 'teacher' | null;
   reviewer_id: number | null;
   created_at: string;
   reviewed_at: string | null;
@@ -49,6 +50,8 @@ export function submissionView(r: SubmissionRow) {
     comment: r.comment,
     studentComment: r.student_comment ?? null,
     aiFeedback: r.ai_feedback ?? null,
+    /** кто запросил разбор: student — студент видел его после сдачи; teacher — запросил преподаватель */
+    aiFeedbackBy: r.ai_feedback_by ?? null,
     createdAt: r.created_at,
     reviewedAt: r.reviewed_at,
   };
@@ -64,4 +67,4 @@ export function submissionFull(r: SubmissionRow) {
 }
 
 /** Столбцы без кода и схемы — для списков. */
-export const SUMMARY_COLS = 's.id, s.user_id, s.practice_id, s.status, s.score, s.results, s.hints_used, s.xp, s.grade, s.comment, s.student_comment, s.ai_feedback, s.reviewer_id, s.created_at, s.reviewed_at';
+export const SUMMARY_COLS = 's.id, s.user_id, s.practice_id, s.status, s.score, s.results, s.hints_used, s.xp, s.grade, s.comment, s.student_comment, s.ai_feedback, s.ai_feedback_by, s.reviewer_id, s.created_at, s.reviewed_at';

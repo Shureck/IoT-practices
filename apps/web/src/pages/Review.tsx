@@ -21,6 +21,7 @@ export default function Review() {
   const [saving, setSaving] = useState(false);
   const [attempts, setAttempts] = useState<Submission[] | null>(null);
   const [histOpen, setHistOpen] = useState(false);
+  const [aiBusy, setAiBusy] = useState<number | null>(null);
   const nav = useNavigate();
   const [ai, setAi] = useState<{ loading: boolean; text: string | null; open: boolean }>({ loading: false, text: null, open: false });
 
@@ -58,6 +59,18 @@ export default function Review() {
       setOpen(false);
       setSub({ ...sub, grade, comment });
     } catch (e) { toast({ kind: 'err', title: 'Ошибка', text: (e as Error).message }); } finally { setSaving(false); }
+  };
+
+  // разбор для попытки из истории (запрашивает преподаватель)
+  const explainAttempt = async (attemptId: number) => {
+    setAiBusy(attemptId);
+    try {
+      const { text, by } = await api.explain(attemptId);
+      setAttempts((list) => list?.map((x) => (x.id === attemptId ? { ...x, aiFeedback: text, aiFeedbackBy: by } : x)) ?? null);
+      if (attemptId === sub.id) setAi({ loading: false, text, open: true });
+    } catch (e) {
+      toast({ kind: 'err', title: 'Разбор недоступен', text: (e as Error).message });
+    } finally { setAiBusy(null); }
   };
 
   const askAi = async () => {
@@ -103,7 +116,7 @@ export default function Review() {
       </div>
       {ai.open && ai.text && (
         <div className="max-h-64 overflow-y-auto border-b border-line bg-accent/5 px-3 py-2 text-[13px]">
-          <div className="mb-1 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-accent"><Bot size={13} /> Разбор ИИ-помощника</div>
+          <div className="mb-1 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-accent"><Bot size={13} /> {sub.aiFeedbackBy === 'student' ? 'Что ИИ-помощник ответил студенту' : 'Разбор ИИ-помощника'}</div>
           <Md text={ai.text} className="md text-[13px]" />
         </div>
       )}
@@ -146,11 +159,19 @@ export default function Review() {
                   )}
                   {a.studentComment && <div className="mt-2 whitespace-pre-wrap rounded-lg bg-accent/6 px-2.5 py-1.5"><b className="text-accent">Студент:</b> {a.studentComment}</div>}
                   {a.comment && <div className="mt-2 whitespace-pre-wrap rounded-lg bg-accent-2/8 px-2.5 py-1.5"><b className="text-accent-2">Преподаватель:</b> {a.comment}</div>}
-                  {a.aiFeedback && (
-                    <details className="mt-2 rounded-lg border border-line px-2.5 py-1.5">
-                      <summary className="cursor-pointer text-[12.5px] text-muted"><Bot size={13} className="mr-1 inline" />Разбор ИИ-помощника</summary>
-                      <Md text={a.aiFeedback} className="md mt-1 text-[13px]" />
-                    </details>
+                  {a.aiFeedback ? (
+                    <div className="mt-2 rounded-lg border border-accent/30 bg-accent/5 px-2.5 py-1.5">
+                      <div className="mb-0.5 flex items-center gap-1.5 text-[12px] font-semibold text-accent">
+                        <Bot size={13} />
+                        {a.aiFeedbackBy === 'teacher' ? 'Разбор ИИ (запросили вы — студент его не видел)' : a.aiFeedbackBy === 'student' ? 'Что ИИ-помощник ответил студенту после сдачи' : 'Разбор ИИ-помощника'}
+                      </div>
+                      <Md text={a.aiFeedback} className="md text-[13px]" />
+                    </div>
+                  ) : a.status === 'failed' && (
+                    <div className="mt-2 flex items-center gap-2 text-[12px] text-faint">
+                      <Bot size={13} /> Разбора ИИ для этой попытки нет.
+                      <Button size="sm" variant="ghost" loading={aiBusy === a.id} onClick={() => void explainAttempt(a.id)}>Запросить разбор</Button>
+                    </div>
                   )}
                 </div>
               );
