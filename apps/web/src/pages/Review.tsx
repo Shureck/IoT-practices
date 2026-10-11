@@ -1,7 +1,7 @@
 // Просмотр сданной работы преподавателем: верстак только для чтения + оценка.
 import { useEffect, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
-import { ArrowLeft, CheckCircle2, XCircle, Eye, MessageSquare, Bot, FilePen } from 'lucide-react';
+import { Link, useNavigate, useParams } from 'react-router-dom';
+import { ArrowLeft, CheckCircle2, XCircle, Eye, MessageSquare, Bot, FilePen, History } from 'lucide-react';
 import { Md } from '../lib/markdown';
 import { api, type Submission } from '../lib/api';
 import { useApp } from '../store/app';
@@ -19,6 +19,9 @@ export default function Review() {
   const [comment, setComment] = useState('');
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [attempts, setAttempts] = useState<Submission[] | null>(null);
+  const [histOpen, setHistOpen] = useState(false);
+  const nav = useNavigate();
   const [ai, setAi] = useState<{ loading: boolean; text: string | null; open: boolean }>({ loading: false, text: null, open: false });
 
   useEffect(() => {
@@ -35,6 +38,13 @@ export default function Review() {
       });
     }).catch((e) => toast({ kind: 'err', title: 'Не удалось открыть работу', text: (e as Error).message }));
   }, [id, catalog, toast]);
+
+  // все попытки этого студента по этой практике (новые сверху)
+  useEffect(() => {
+    if (!sub?.studentId) return;
+    setAttempts(null);
+    api.teacherSubmissions({ studentId: sub.studentId, practiceId: sub.practiceId }).then((r) => setAttempts(r.submissions)).catch(() => setAttempts([]));
+  }, [sub?.studentId, sub?.practiceId, sub?.id, sub?.grade]);
 
   if (!sub) return <div className="flex h-full items-center justify-center"><Spinner /></div>;
   const practice = catalog?.practices.find((p) => p.id === sub.practiceId);
@@ -85,6 +95,7 @@ export default function Review() {
               {ai.text ? (ai.open ? 'Скрыть разбор ИИ' : 'Разбор ИИ') : 'Разбор ИИ'}
             </Button>
           )}
+          <Button size="sm" variant="ghost" icon={<History size={14} />} onClick={() => setHistOpen(true)}>Попытки{attempts ? ` (${attempts.length})` : ''}</Button>
           {sub.studentId && <Link to={`/review/draft/${sub.studentId}/${sub.practiceId}`} className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[13px] text-muted hover:bg-panel-2 hover:text-text" title="Что сейчас в редакторе у студента (может быть новее этой сдачи)"><FilePen size={14} />Текущий черновик</Link>}
           <Button size="sm" variant="ghost" icon={<Eye size={14} />} onClick={() => void showSolution()}>Эталон</Button>
           <Button size="sm" variant="primary" icon={<MessageSquare size={14} />} onClick={() => setOpen(true)}>{sub.grade ? `Оценка: ${sub.grade}` : 'Оценить'}</Button>
@@ -110,6 +121,43 @@ export default function Review() {
         ))}
       </div>
       <div className="min-h-0 flex-1"><Workbench /></div>
+      <Modal open={histOpen} onClose={() => setHistOpen(false)} title={`История попыток — ${sub.studentName ?? ''}, «${practice?.title ?? sub.practiceId}»`} wide>
+        {!attempts ? <Spinner /> : !attempts.length ? <div className="py-6 text-center text-sm text-muted">Попыток нет.</div> : (
+          <div className="max-h-[65vh] space-y-2 overflow-y-auto pr-1">
+            {attempts.map((a, i) => {
+              const ok = a.results.filter((r) => r.ok).length;
+              const current = a.id === sub.id;
+              return (
+                <div key={a.id} className={`rounded-xl border p-3 text-[13px] ${current ? 'border-accent/60 bg-accent/5' : 'border-line'}`}>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-semibold">Попытка {attempts.length - i}</span>
+                    {a.status === 'passed' ? <CheckCircle2 size={16} className="text-ok" /> : <XCircle size={16} className="text-err" />}
+                    <Badge tone={a.status === 'passed' ? 'ok' : 'warn'}>{a.results.length ? `${ok}/${a.results.length} проверок` : `${Math.round(a.score * 100)} %`}</Badge>
+                    {a.grade && <Badge tone="violet">оценка {a.grade}</Badge>}
+                    {a.hintsUsed > 0 && <Badge>подсказок: {a.hintsUsed}</Badge>}
+                    <span className="text-xs text-faint">{new Date(a.createdAt).toLocaleString('ru-RU')}</span>
+                    {current ? <span className="ml-auto text-xs font-medium text-accent">открыта сейчас</span>
+                      : <Button size="sm" variant="ghost" className="ml-auto" onClick={() => { setHistOpen(false); nav(`/review/${a.id}`); }}>Открыть</Button>}
+                  </div>
+                  {a.results.some((r) => !r.ok) && (
+                    <ul className="mt-1.5 space-y-0.5 text-[12.5px] text-muted">
+                      {a.results.filter((r) => !r.ok).map((r) => <li key={r.id}>✗ {r.title}{r.message ? ` — ${r.message}` : ''}</li>)}
+                    </ul>
+                  )}
+                  {a.studentComment && <div className="mt-2 whitespace-pre-wrap rounded-lg bg-accent/6 px-2.5 py-1.5"><b className="text-accent">Студент:</b> {a.studentComment}</div>}
+                  {a.comment && <div className="mt-2 whitespace-pre-wrap rounded-lg bg-accent-2/8 px-2.5 py-1.5"><b className="text-accent-2">Преподаватель:</b> {a.comment}</div>}
+                  {a.aiFeedback && (
+                    <details className="mt-2 rounded-lg border border-line px-2.5 py-1.5">
+                      <summary className="cursor-pointer text-[12.5px] text-muted"><Bot size={13} className="mr-1 inline" />Разбор ИИ-помощника</summary>
+                      <Md text={a.aiFeedback} className="md mt-1 text-[13px]" />
+                    </details>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </Modal>
       <Modal open={open} onClose={() => setOpen(false)} title="Оценка работы" footer={<><Button onClick={() => setOpen(false)}>Отмена</Button><Button variant="primary" loading={saving} onClick={() => void save()}>Сохранить</Button></>}>
         <div className="mb-3 flex gap-2">
           {[2, 3, 4, 5].map((g) => (
