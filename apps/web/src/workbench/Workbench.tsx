@@ -135,7 +135,7 @@ function BottomPanel() {
         />
         <IconButton title={open ? 'Свернуть' : 'Развернуть'} onClick={() => set({ bottomOpen: !open })}>{open ? <ChevronDown size={15} /> : <ChevronUp size={15} />}</IconButton>
       </div>
-      {open && (
+      {open && tab !== 'board' && (
         <div className="min-h-0 flex-1">
           {tab === 'serial' && <SerialPanel />}
           {tab === 'plotter' && <PlotterPanel />}
