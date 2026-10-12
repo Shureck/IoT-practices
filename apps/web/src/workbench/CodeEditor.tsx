@@ -5,7 +5,7 @@ import { cpp } from '@codemirror/lang-cpp';
 import { acceptCompletion, autocompletion, type CompletionContext, type Completion } from '@codemirror/autocomplete';
 import { Prec } from '@codemirror/state';
 import { linter, lintGutter, type Diagnostic } from '@codemirror/lint';
-import { EditorView, keymap } from '@codemirror/view';
+import { EditorView, keymap, tooltips } from '@codemirror/view';
 import { HighlightStyle, syntaxHighlighting, indentUnit } from '@codemirror/language';
 import { tags as t } from '@lezer/highlight';
 import { CLASSES, CONSTS, FUNCS, GLOBAL_OBJECTS, compileSketch, type Diag } from '@esp32lab/sim';
@@ -24,7 +24,12 @@ const darkTheme = EditorView.theme({
   '.cm-matchingBracket': { backgroundColor: 'color-mix(in srgb, var(--accent) 22%, transparent)', outline: 'none' },
   '.cm-tooltip': { backgroundColor: 'var(--panel)', border: '1px solid var(--border)', color: 'var(--text)' },
   '.cm-tooltip-autocomplete ul li[aria-selected]': { backgroundColor: 'color-mix(in srgb, var(--accent) 22%, transparent)', color: 'var(--text)' },
-  '.cm-completionDetail': { color: 'var(--faint)', fontStyle: 'normal', marginLeft: '8px' },
+  // длинная сигнатура не растягивает список: обрезается многоточием, целиком — в описании
+  '.cm-tooltip.cm-tooltip-autocomplete > ul': { maxWidth: 'min(380px, 92vw)', minWidth: '200px' },
+  '.cm-completionDetail': {
+    color: 'var(--faint)', fontStyle: 'normal', marginLeft: '8px',
+    display: 'inline-block', maxWidth: '170px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', verticalAlign: 'bottom',
+  },
   '.cm-diagnostic-error': { borderLeft: '3px solid var(--err)' },
   '.cm-diagnostic-warning': { borderLeft: '3px solid var(--warn)' },
   '.cm-lintRange-error': { backgroundImage: 'none', textDecoration: 'underline wavy var(--err)', textUnderlineOffset: '3px' },
@@ -44,15 +49,26 @@ const highlight = HighlightStyle.define([
   { tag: t.constant(t.variableName), color: '#f78c6c' },
 ]);
 
+/** Описание подсказки: полная сигнатура + текст справки. */
+function docInfo(sig: string | undefined, text: string | undefined): Completion['info'] {
+  if (!text && !(sig && sig.length > 24)) return undefined;
+  return () => {
+    const el = document.createElement('div');
+    if (sig) { const c = document.createElement('code'); c.textContent = sig; el.appendChild(c); }
+    if (text) el.appendChild(document.createTextNode(text));
+    return el;
+  };
+}
+
 function buildCompletions(): Completion[] {
   const out: Completion[] = [];
   for (const [name, meta] of Object.entries(FUNCS)) {
     const doc = API_DOCS[name];
-    out.push({ label: name, type: 'function', detail: doc?.sig ?? meta.replace(/[*~]/g, ''), info: doc?.text, apply: `${name}(`, boost: doc ? 2 : 0 });
+    out.push({ label: name, type: 'function', detail: doc?.sig ?? meta.replace(/[*~]/g, ''), info: docInfo(doc?.sig, doc?.text), apply: `${name}(`, boost: doc ? 2 : 0 });
   }
   for (const name of ['min', 'max', 'abs', 'constrain', 'map', 'sqrt', 'pow', 'sprintf', 'snprintf', 'strcpy', 'strcat', 'serializeJson', 'bitRead', 'bitWrite', 'F']) {
     const doc = API_DOCS[name];
-    out.push({ label: name, type: 'function', detail: doc?.sig, info: doc?.text, apply: `${name}(` });
+    out.push({ label: name, type: 'function', detail: doc?.sig, info: docInfo(doc?.sig, doc?.text), apply: `${name}(` });
   }
   for (const name of Object.keys(CONSTS)) if (!/^(BIT\d|GPIO_NUM_)/.test(name)) out.push({ label: name, type: 'constant' });
   for (const [name, g] of Object.entries(GLOBAL_OBJECTS)) out.push({ label: name, type: 'variable', detail: g.cls });
@@ -82,7 +98,7 @@ function memberCompletions(code: string, obj: string): Completion[] {
   }
   const meta = cls ? CLASSES[cls === 'DynamicJsonDocument' || cls === 'JsonDocument' ? '' : cls] : undefined;
   if (!meta) return [];
-  return Object.entries(meta.methods).map(([m, r]) => ({ label: m, type: 'method', detail: r.replace(/[*~]/g, ''), info: API_DOCS[`${cls}.${m}`]?.text, apply: `${m}(` }));
+  return Object.entries(meta.methods).map(([m, r]) => ({ label: m, type: 'method', detail: r.replace(/[*~]/g, ''), info: docInfo(API_DOCS[`${cls}.${m}`]?.sig, API_DOCS[`${cls}.${m}`]?.text), apply: `${m}(` }));
 }
 
 const KNOWN = new Set(ALL.map((c) => c.label));
@@ -154,6 +170,13 @@ export function CodeEditor() {
     syntaxHighlighting(highlight),
     darkTheme,
     autocompletion({ override: [complete], icons: true, activateOnTyping: true }),
+    // подсказки держатся в пределах редактора по горизонтали: не заезжают на схему и не уходят за край окна
+    tooltips({
+      tooltipSpace: (view) => {
+        const r = view.dom.getBoundingClientRect();
+        return { left: r.left, right: r.right, top: 0, bottom: window.innerHeight };
+      },
+    }),
     // Tab выбирает подсказку (Enter — тоже); без открытого списка Tab работает как обычно
     Prec.highest(keymap.of([{ key: 'Tab', run: acceptCompletion }])),
     lintGutter(),

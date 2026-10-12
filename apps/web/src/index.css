@@ -150,7 +150,12 @@ body {
 
 .cm-editor { height: 100%; font-size: 13.5px; }
 .cm-editor .cm-scroller { font-family: var(--font-mono); line-height: 1.6; }
-.cm-tooltip-autocomplete { border-radius: 8px !important; overflow: hidden; }
+/* Описание подсказки (.cm-completionInfo) — дочерний элемент списка и стоит сбоку от него:
+   overflow: hidden у списка обрезал бы его целиком, поэтому скругляем сам ul. */
+.cm-tooltip-autocomplete { border-radius: 8px !important; }
+.cm-tooltip-autocomplete > ul { border-radius: 8px; }
+.cm-tooltip.cm-completionInfo { border-radius: 8px; padding: 6px 10px; line-height: 1.45; white-space: pre-line; }
+.cm-completionInfo code { display: block; margin-bottom: 4px; font-family: var(--font-mono); color: var(--accent); white-space: pre-wrap; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
