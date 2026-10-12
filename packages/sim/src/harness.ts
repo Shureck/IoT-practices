@@ -1,7 +1,7 @@
 // Автопроверка практик: прогон скетча в безголовом режиме и проверки.
 import { Simulation } from './simulation';
 import type { CircuitDoc, Part } from './circuit/defs';
-import { propValue } from './circuit/defs';
+import { DEFS, propValue } from './circuit/defs';
 import type { Model } from './circuit/sim';
 import { MockNet, type MockNetOptions } from './net/mock';
 import { compileSketch, type CompileOutput } from './lang/compiler';
@@ -33,6 +33,33 @@ export interface HarnessOptions {
   seed?: number;
   /** общий бюджет реального времени на все проверки, мс (сервер обрывает проверку целиком позже) */
   budgetMs?: number;
+  /**
+   * Схемы-образцы (эталон, стартовая): перед каждой проверкой «живые» ручки датчиков
+   * (освещённость, потенциометр, температура…) ставятся как в них — а не там, где студент
+   * оставил их, пока отлаживал. Детали, которых в образцах нет, — в значение по умолчанию.
+   */
+  baseline?: (CircuitDoc | null | undefined)[];
+}
+
+/** «Чёрные ящики»: их настройки — загадка задания, а не выбор студента. */
+export const TASK_DEVICES = ['uartbox', 'i2cbox'];
+
+/**
+ * Вернуть входы схемы в исходное положение (см. HarnessOptions.baseline): «живые» ручки датчиков,
+ * а у «чёрных ящиков» из задания — все настройки.
+ */
+export function resetLiveProps(circuit: CircuitDoc, baseline: (CircuitDoc | null | undefined)[]): CircuitDoc {
+  const out = structuredClone(circuit);
+  for (const p of out.parts) {
+    const ref = baseline.map((b) => b?.parts.find((x) => x.id === p.id && x.type === p.type)).find(Boolean);
+    const live = (DEFS[p.type]?.props ?? []).filter((d) => d.live || (ref && TASK_DEVICES.includes(p.type)));
+    if (!live.length) continue;
+    for (const d of live) {
+      const v = ref ? propValue(ref, d.key) : d.default;
+      if (v === undefined || v === d.default) delete p.props[d.key]; else p.props[d.key] = v;
+    }
+  }
+  return out;
 }
 
 /** История переключений одного вывода: время (мс) и уровень ×2 (0, 1 — ШИМ, 2). */
@@ -82,7 +109,8 @@ export class CheckContext {
 
   constructor(public code: string, public circuit: CircuitDoc, compiled: CompileOutput, opts: HarnessOptions) {
     this.net = new MockNet({ ...opts.net, now: () => new Date(Date.UTC(2025, 9, 15, 9, 0, 0) + (this.sim?.M?.now() ?? 0) / 1000) });
-    this.sim = new Simulation({ code, circuit: structuredClone(circuit), net: this.net, compiled, seed: opts.seed ?? 12345 });
+    const doc = opts.baseline ? resetLiveProps(circuit, opts.baseline) : structuredClone(circuit);
+    this.sim = new Simulation({ code, circuit: doc, net: this.net, compiled, seed: opts.seed ?? 12345 });
     const board = this.sim.board;
     const orig = board.gpioChanged.bind(board);
     board.gpioChanged = (pin: number) => {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { DEFS, Harness, compileSketch } from '@esp32lab/sim';
-import { MODULES, PRACTICES } from '../src/index';
+import { DEFS, Harness, TASK_DEVICES, compileSketch } from '@esp32lab/sim';
+import { MODULES, PRACTICES, checkOptions } from '../src/index';
 
 const only = process.env.PRACTICE;
 const list = only ? PRACTICES.filter((p) => p.id === only) : PRACTICES;
@@ -54,14 +54,35 @@ for (const p of list) {
     });
 
     it('эталонное решение проходит все проверки', async () => {
-      const r = await Harness.run(p.solution.code, p.solution.circuit ?? p.starterCircuit, p.checks, { net: p.net });
+      const r = await Harness.run(p.solution.code, p.solution.circuit ?? p.starterCircuit, p.checks, checkOptions(p));
       expect(r.compile.diagnostics.filter((d) => d.severity === 'error'), JSON.stringify(r.compile.diagnostics)).toEqual([]);
       const failed = r.results.filter((x) => !x.ok);
       expect(failed, JSON.stringify(failed, null, 1)).toEqual([]);
     }, 120000);
 
+    // студент мог оставить ручки датчиков где угодно, пока отлаживал (или перенастроить «чёрный ящик»), —
+    // на проверку это влиять не должно
+    it('эталон проходит при любом положении ручек датчиков', async () => {
+      const base = p.solution.circuit ?? p.starterCircuit;
+      for (const edge of ['min', 'max'] as const) {
+        const c = structuredClone(base);
+        for (const part of c.parts) {
+          for (const d of DEFS[part.type]?.props ?? []) {
+            if (d.live) part.props[d.key] = d.type === 'bool' ? edge === 'max' : (edge === 'max' ? d.max : d.min)!;
+            else if (TASK_DEVICES.includes(part.type)) {
+              const opts = d.options ?? [];
+              part.props[d.key] = d.type === 'select' ? opts[edge === 'max' ? opts.length - 1 : 0].value : d.type === 'number' ? (edge === 'max' ? d.max : d.min)! : 'XYZ';
+            }
+          }
+        }
+        const r = await Harness.run(p.solution.code, c, p.checks, checkOptions(p));
+        const failed = r.results.filter((x) => !x.ok);
+        expect(failed, `ручки на ${edge}: ${JSON.stringify(failed, null, 1)}`).toEqual([]);
+      }
+    }, 120000);
+
     it('стартовый код не проходит проверки', async () => {
-      const r = await Harness.run(p.starterCode, p.starterCircuit, p.checks, { net: p.net });
+      const r = await Harness.run(p.starterCode, p.starterCircuit, p.checks, checkOptions(p));
       expect(r.results.some((x) => !x.ok)).toBe(true);
     }, 120000);
   });

@@ -16,5 +16,5 @@ export { MemoryChat, virtualHttp, isVirtualHost, VIRTUAL_HOSTS, weatherFor } fro
 export type { ChatStore, ChatMessage, ServiceCtx } from './net/services';
 export { MockNet } from './net/mock';
 export type { MockNetOptions } from './net/mock';
-export { Harness, CheckContext, CheckFail } from './harness';
-export type { CheckResult, CheckSpec, Transition } from './harness';
+export { Harness, CheckContext, CheckFail, resetLiveProps, TASK_DEVICES } from './harness';
+export type { CheckResult, CheckSpec, Transition, HarnessOptions } from './harness';

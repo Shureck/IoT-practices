@@ -1,7 +1,7 @@
 // Палитра компонентов и инспектор свойств.
 import { useMemo, useState } from 'react';
 import { RotateCw, Trash2, Copy, Search, Lock } from 'lucide-react';
-import { COMPONENTS, DEFS, fmtOhm, propValue, type PropDef } from '@esp32lab/sim';
+import { COMPONENTS, DEFS, TASK_DEVICES, fmtOhm, propValue, type PropDef } from '@esp32lab/sim';
 import { useWB, WIRE_COLORS } from './store';
 import { PartIcon } from './parts';
 import { setLiveProp } from './simController';
@@ -104,6 +104,7 @@ export function Inspector() {
   const running = useWB((s) => s.running);
   const readOnly = useWB((s) => s.readOnly);
   const locked = useWB((s) => s.circuitLocked);
+  const mode = useWB((s) => s.mode);
   const wireColor = useWB((s) => s.wireColor);
   const st = useWB.getState;
 
@@ -158,7 +159,8 @@ export function Inspector() {
   const part = circuit.parts.find((p) => p.id === sel.id);
   if (!part) return null;
   const def = DEFS[part.type];
-  const editable = !readOnly && !(locked && part.locked);
+  // «чёрный ящик», выданный заданием, настраивать нельзя: его параметры — загадка (в песочнице — можно)
+  const editable = !readOnly && !(part.locked && (locked || (mode !== 'sandbox' && TASK_DEVICES.includes(part.type))));
   const canDelete = !readOnly && !part.locked && part.type !== 'esp32';
   return (
     <div className="space-y-3 p-3">
@@ -178,7 +180,10 @@ export function Inspector() {
         const live = !!pd.live;
         if (!editable && !(live && running)) {
           return (
-            <div key={pd.key} className="flex justify-between text-xs"><span className="text-muted">{pd.label}</span><span className="font-mono">{fmtProp(pd, propValue(part, pd.key))}</span></div>
+            <div key={pd.key} className="flex justify-between text-xs"><span className="text-muted">{pd.label}</span><span className="font-mono">{
+              // секрет «чёрного ящика» — ответ загадки: в задании не показываем
+              pd.key === 'secret' && !editable && TASK_DEVICES.includes(part.type) && mode === 'practice' ? 'скрыт' : fmtProp(pd, propValue(part, pd.key))
+            }</span></div>
           );
         }
         return (

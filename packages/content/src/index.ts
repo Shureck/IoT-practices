@@ -1,6 +1,7 @@
 import { PRACTICES_A } from './practices/part-a';
 import { PRACTICES_B } from './practices/part-b';
 import { PRACTICES_C } from './practices/part-c';
+import type { CircuitDoc, HarnessOptions } from '@esp32lab/sim';
 import type { Practice } from './types';
 
 export * from './types';
@@ -10,6 +11,11 @@ export * as helpers from './helpers';
 export const PRACTICES: Practice[] = [...PRACTICES_A, ...PRACTICES_B, ...PRACTICES_C].sort((a, b) => a.module - b.module || a.order - b.order);
 
 export const PRACTICE_BY_ID: Record<string, Practice> = Object.fromEntries(PRACTICES.map((p) => [p.id, p]));
+
+/** Параметры автопроверки практики: сеть и исходное положение ручек датчиков (из эталона и стартовой схемы). */
+export function checkOptions(p: Practice): HarnessOptions {
+  return { net: p.net, baseline: [p.solution?.circuit as CircuitDoc | undefined, p.starterCircuit as CircuitDoc] };
+}
 
 /** Публичная часть практики (без решения и кода проверок) — для клиента без прав преподавателя. */
 export function publicPractice(p: Practice) {
