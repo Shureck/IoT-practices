@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, CheckCircle2, XCircle, Eye, MessageSquare, Bot, FilePen, History } from 'lucide-react';
 import { Md } from '../lib/markdown';
+import type { CheckResult, CircuitDoc } from '@esp32lab/sim';
 import { api, type Submission } from '../lib/api';
 import { useApp } from '../store/app';
 import { useWB } from '../workbench/store';
@@ -195,19 +196,43 @@ export default function Review() {
 export function DraftReview() {
   const { studentId, practiceId } = useParams();
   const catalog = useApp((s) => s.catalog);
+  const toast = useApp((s) => s.toast);
   const [info, setInfo] = useState<{ studentName: string; updatedAt: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [check, setCheck] = useState<{ busy: 'check' | 'ai' | null; results: CheckResult[] | null; ai: string | null; aiOpen: boolean }>({ busy: null, results: null, ai: null, aiOpen: false });
   const practice = catalog?.practices.find((p) => p.id === practiceId) ?? null;
+
+  const load = (d: { code: string; circuit: CircuitDoc }, name: string, results?: CheckResult[]) => {
+    stopSim();
+    useWB.getState().init({ mode: 'review', practice, readOnly: true, title: `${name} — ${practice?.title ?? ''} (черновик)`, code: d.code, circuit: d.circuit, ...(results ? { checkResults: results } : {}) });
+  };
 
   useEffect(() => {
     if (!catalog) return;
-    setInfo(null); setError(null);
+    setInfo(null); setError(null); setCheck({ busy: null, results: null, ai: null, aiOpen: false });
     void api.studentDraft(Number(studentId), practiceId ?? '').then((d) => {
       setInfo({ studentName: d.studentName, updatedAt: d.updatedAt });
-      stopSim();
-      useWB.getState().init({ mode: 'review', practice, readOnly: true, title: `${d.studentName} — ${practice?.title ?? ''} (черновик)`, code: d.code, circuit: d.circuit });
+      load(d, d.studentName);
     }).catch((e) => setError((e as Error).message));
-  }, [studentId, practiceId, catalog, practice]);
+  }, [studentId, practiceId, catalog, practice]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // проверка черновика на сервере; с ai — ещё и разбор ИИ (если что-то не прошло)
+  const run = async (ai: boolean) => {
+    if (!info) return;
+    if (ai && check.ai && !check.busy) { setCheck({ ...check, aiOpen: !check.aiOpen }); return; }
+    setCheck((c) => ({ ...c, busy: ai ? 'ai' : 'check' }));
+    try {
+      const r = await api.draftCheck(Number(studentId), practiceId ?? '', ai);
+      // студент мог изменить черновик — показываем ровно ту версию, что проверили
+      if (r.updatedAt !== info.updatedAt) setInfo({ ...info, updatedAt: r.updatedAt });
+      load(r, info.studentName, r.results);
+      setCheck({ busy: null, results: r.results, ai: r.aiText ?? check.ai, aiOpen: ai && !!r.aiText });
+      if (ai && !r.aiText && r.results.every((x) => x.ok)) toast({ kind: 'ok', title: 'Все проверки пройдены', text: 'Разбирать нечего — работу можно сдавать.' });
+    } catch (e) {
+      setCheck((c) => ({ ...c, busy: null }));
+      toast({ kind: 'err', title: ai ? 'Разбор недоступен' : 'Проверка не удалась', text: (e as Error).message });
+    }
+  };
 
   if (error) return <div className="flex h-full flex-col items-center justify-center gap-3 text-sm text-muted">{error}<Link to="/teacher" className="text-accent hover:underline">В кабинет</Link></div>;
   if (!info) return <div className="flex h-full items-center justify-center"><Spinner /></div>;
@@ -218,8 +243,34 @@ export function DraftReview() {
         <span className="font-semibold">{info.studentName}</span>
         <span className="text-muted">{practice?.title}</span>
         <Badge tone="accent">черновик — ещё не сдан</Badge>
+        {check.results && <Badge tone={check.results.every((r) => r.ok) ? 'ok' : 'warn'}>{check.results.filter((r) => r.ok).length}/{check.results.length} проверок</Badge>}
         <span className="text-xs text-faint">изменён {new Date(info.updatedAt).toLocaleString('ru-RU')}</span>
+        {practice?.kind !== 'quiz' && (
+          <div className="ml-auto flex gap-1.5">
+            <Button size="sm" variant="ghost" icon={<CheckCircle2 size={14} />} loading={check.busy === 'check'} disabled={!!check.busy} onClick={() => void run(false)}
+              title="Прогнать автопроверки по текущему черновику. Студент результат не увидит">Проверить</Button>
+            <Button size="sm" variant="ghost" icon={<Bot size={14} />} loading={check.busy === 'ai'} disabled={!!check.busy} onClick={() => void run(true)}
+              title="Проверить и попросить ИИ объяснить, что не так. Студент разбор не увидит">
+              {check.ai ? (check.aiOpen ? 'Скрыть разбор ИИ' : 'Разбор ИИ') : 'Разбор ИИ'}
+            </Button>
+          </div>
+        )}
       </div>
+      {check.aiOpen && check.ai && (
+        <div className="max-h-64 overflow-y-auto border-b border-line bg-accent/5 px-3 py-2 text-[13px]">
+          <div className="mb-1 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-accent"><Bot size={13} /> Разбор ИИ по черновику (студент его не видел)</div>
+          <Md text={check.ai} className="md text-[13px]" />
+        </div>
+      )}
+      {check.results && (
+        <div className="flex flex-wrap gap-1.5 border-b border-line px-3 py-1.5">
+          {check.results.map((r) => (
+            <span key={r.id} title={r.message} className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11.5px] ${r.ok ? 'bg-ok/10 text-ok' : 'bg-err/10 text-err'}`}>
+              {r.ok ? <CheckCircle2 size={12} /> : <XCircle size={12} />}{r.title}
+            </span>
+          ))}
+        </div>
+      )}
       <div className="min-h-0 flex-1"><Workbench /></div>
     </div>
   );

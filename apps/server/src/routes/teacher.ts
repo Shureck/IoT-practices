@@ -1,9 +1,13 @@
 import crypto from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import type { CircuitDoc } from '@esp32lab/sim';
 import type { AppCtx } from '../ctx';
+import { perUser } from '../ctx';
 import { requireTeacher, userXp } from '../auth';
-import { badRequest, notFound, parse } from '../errors';
+import { HttpError, badRequest, notFound, parse } from '../errors';
+import { cleanAnswer, explainPrompt } from '../ai';
+import { runChecks } from './submissions';
 import { getPractice } from '../grading';
 import { IdParam, SUMMARY_COLS, submissionFull, submissionView, type SubmissionRow } from './common';
 import { assignmentView, progressOf } from './progress';
@@ -77,17 +81,53 @@ export function teacherRoutes(app: FastifyInstance, ctx: AppCtx) {
     return { group: groupView(ownGroup(t.id, Number(r.lastInsertRowid))) };
   });
 
+  /** Черновик студента из группы этого преподавателя. */
+  function ownDraft(teacherId: number, studentId: number, practiceId: string) {
+    const st = db.prepare(`SELECT st.id, st.name FROM users st JOIN groups g ON g.id = st.group_id
+      WHERE st.id = ? AND g.teacher_id = ?`).get(studentId, teacherId) as { id: number; name: string } | undefined;
+    if (!st) throw notFound('Студент не найден в ваших группах');
+    const d = db.prepare('SELECT code, circuit, updated_at FROM drafts WHERE user_id = ? AND practice_id = ?')
+      .get(st.id, practiceId) as { code: string; circuit: string; updated_at: string } | undefined;
+    if (!d) throw notFound('У студента нет черновика этой практики');
+    return { st, code: d.code, circuit: JSON.parse(d.circuit) as CircuitDoc, updatedAt: d.updated_at };
+  }
+
   // черновик студента (несданная работа): код и схема как сейчас в редакторе студента
   app.get<{ Params: { studentId: string; practiceId: string } }>('/api/teacher/students/:studentId/drafts/:practiceId', async (req) => {
     const t = requireTeacher(req);
-    const studentId = Number(req.params.studentId);
-    const st = db.prepare(`SELECT st.id, st.name FROM users st JOIN groups g ON g.id = st.group_id
-      WHERE st.id = ? AND g.teacher_id = ?`).get(studentId, t.id) as { id: number; name: string } | undefined;
-    if (!st) throw notFound('Студент не найден в ваших группах');
-    const d = db.prepare('SELECT code, circuit, updated_at FROM drafts WHERE user_id = ? AND practice_id = ?')
-      .get(st.id, req.params.practiceId) as { code: string; circuit: string; updated_at: string } | undefined;
-    if (!d) throw notFound('У студента нет черновика этой практики');
-    return { studentId: st.id, studentName: st.name, practiceId: req.params.practiceId, code: d.code, circuit: JSON.parse(d.circuit), updatedAt: d.updated_at };
+    const d = ownDraft(t.id, Number(req.params.studentId), req.params.practiceId);
+    return { studentId: d.st.id, studentName: d.st.name, practiceId: req.params.practiceId, code: d.code, circuit: d.circuit, updatedAt: d.updatedAt };
+  });
+
+  // Автопроверка черновика и (по желанию) разбор ИИ — для работ, которые студент ещё не сдал.
+  // Ничего не сохраняется: студент этого не видит. Разбор кэшируется по содержимому черновика.
+  const draftAi = new Map<string, string>();
+  app.post<{ Params: { studentId: string; practiceId: string } }>('/api/teacher/students/:studentId/drafts/:practiceId/check', { config: perUser(10) }, async (req) => {
+    const t = requireTeacher(req);
+    const { ai } = parse(z.object({ ai: z.boolean().default(false) }), req.body ?? {});
+    const d = ownDraft(t.id, Number(req.params.studentId), req.params.practiceId);
+    const practice = getPractice(req.params.practiceId);
+    if (!practice) throw notFound('Практика не найдена');
+    if (practice.kind === 'quiz') throw badRequest('Тест проверяется только при сдаче');
+    const out = await runChecks(ctx, practice, d.code, d.circuit);
+    let aiText: string | null = null;
+    if (ai && out.results.some((r) => !r.ok)) {
+      if (!ctx.llm) throw new HttpError(503, 'ИИ-помощник не настроен на этом сервере');
+      const key = crypto.createHash('sha256').update(JSON.stringify([practice.id, d.code, d.circuit, out.results])).digest('hex');
+      aiText = draftAi.get(key) ?? null;
+      if (!aiText) {
+        try {
+          aiText = cleanAnswer(await ctx.llm(explainPrompt(practice, d.code, d.circuit, out.results))).slice(0, 6000);
+        } catch (e) {
+          req.log.warn({ err: (e as Error).message }, 'ai draft explain failed');
+          throw new HttpError(502, 'ИИ-помощник сейчас недоступен — попробуйте позже');
+        }
+        if (!aiText) throw new HttpError(502, 'ИИ-помощник вернул пустой ответ — попробуйте ещё раз');
+        if (draftAi.size >= 200) draftAi.delete(draftAi.keys().next().value!);
+        draftAi.set(key, aiText);
+      }
+    }
+    return { compile: out.compile, results: out.results, aiText, code: d.code, circuit: d.circuit, updatedAt: d.updatedAt };
   });
 
   // доступ к практикам: какие практики открыты группе

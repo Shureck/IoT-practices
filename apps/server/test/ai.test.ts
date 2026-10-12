@@ -68,6 +68,38 @@ describe('ИИ-разбор ошибок', () => {
     expect((await new Client(t.app).get('/api/health')).body.ai).toBe(true);
   });
 
+  it('преподаватель проверяет несданный черновик и просит разбор ИИ', async () => {
+    const me = (await student.get('/api/me')).body.user;
+    const broken = 'void setup() { pinMode(2, OUTPUT); }\nvoid loop() { digitalWrite(2, HIGH); delay(1000); digitalWrite(2, LOW); }\n';
+    expect((await student.put(`/api/drafts/${blink.id}`, { code: broken, circuit: blink.starterCircuit })).status).toBe(200);
+    const url = `/api/teacher/students/${me.id}/drafts/${blink.id}/check`;
+    const before = calls.length;
+    // без ИИ — только проверки, модель не вызывается
+    const plain = await teacher.post(url, { ai: false });
+    expect(plain.status).toBe(200);
+    expect(plain.body.results.some((r: { ok: boolean }) => !r.ok)).toBe(true);
+    expect(plain.body.aiText).toBeNull();
+    expect(plain.body.code).toBe(broken);
+    expect(calls.length).toBe(before);
+    // с ИИ — разбор; повтор того же черновика берётся из кэша
+    const r = await teacher.post(url, { ai: true });
+    expect(r.body.aiText).toBe('**Что не так** — после `LOW` нет паузы (строка 3).');
+    expect(calls.length).toBe(before + 1);
+    expect(calls[calls.length - 1].input).toContain('  2| void loop()');
+    expect((await teacher.post(url, { ai: true })).body.aiText).toBe(r.body.aiText);
+    expect(calls.length).toBe(before + 1);
+    // исправленный черновик: всё прошло — модель не нужна
+    await student.put(`/api/drafts/${blink.id}`, { code: blink.solution.code, circuit: blink.solution.circuit ?? blink.starterCircuit });
+    const ok = await teacher.post(url, { ai: true });
+    expect(ok.body.results.every((x: { ok: boolean }) => x.ok)).toBe(true);
+    expect(ok.body.aiText).toBeNull();
+    expect(calls.length).toBe(before + 1);
+    // чужим нельзя
+    expect((await student.post(url, { ai: true })).status).toBe(403);
+    const stranger = (await registered(t.app, { role: 'teacher', teacherCode: 'teach-secret', name: 'Чужой' })).c;
+    expect((await stranger.post(url, { ai: true })).status).toBe(404);
+  });
+
   it('разбор ответа Responses API', () => {
     expect(outputText({ output_text: 'привет' })).toBe('привет');
     expect(outputText({ output: [{ type: 'reasoning', content: [{ type: 'text', text: 'мысли' }] }, { type: 'message', content: [{ type: 'output_text', text: 'ответ' }] }] })).toBe('ответ');
