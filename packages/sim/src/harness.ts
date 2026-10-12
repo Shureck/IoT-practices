@@ -31,13 +31,54 @@ export interface Transition { t: number; v: number }
 export interface HarnessOptions {
   net?: MockNetOptions;
   seed?: number;
+  /** общий бюджет реального времени на все проверки, мс (сервер обрывает проверку целиком позже) */
+  budgetMs?: number;
 }
+
+/** История переключений одного вывода: время (мс) и уровень ×2 (0, 1 — ШИМ, 2). */
+class PinLog {
+  t = new Float64Array(64);
+  v = new Uint8Array(64);
+  n = 0;
+  /** всего переключений (с отброшенными) */
+  total = 0;
+  push(t: number, v: number) {
+    if (this.n === this.t.length) {
+      if (this.n >= PINLOG_MAX) {
+        // «шторм» переключений: старая половина истории проверкам уже не нужна
+        const half = this.n >> 1;
+        this.t.copyWithin(0, half);
+        this.v.copyWithin(0, half);
+        this.n -= half;
+      } else {
+        const t2 = new Float64Array(this.n * 2); t2.set(this.t); this.t = t2;
+        const v2 = new Uint8Array(this.n * 2); v2.set(this.v); this.v = v2;
+      }
+    }
+    this.t[this.n] = t;
+    this.v[this.n] = Math.round(v * 2);
+    this.n++;
+    this.total++;
+  }
+  lastV(): number { return this.v[this.n - 1] / 2; }
+  /** первый индекс с t ≥ x (strict: t > x) */
+  lower(x: number, strict = false): number {
+    let lo = 0;
+    let hi = this.n;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (strict ? this.t[mid] <= x : this.t[mid] < x) lo = mid + 1; else hi = mid;
+    }
+    return lo;
+  }
+}
+const PINLOG_MAX = 1 << 21;
 
 /** Контекст одной проверки. Все времена — в миллисекундах виртуального времени. */
 export class CheckContext {
   sim: Simulation;
   net: MockNet;
-  private hist = new Map<number, Transition[]>();
+  private hist = new Map<number, PinLog>();
 
   constructor(public code: string, public circuit: CircuitDoc, compiled: CompileOutput, opts: HarnessOptions) {
     this.net = new MockNet({ ...opts.net, now: () => new Date(Date.UTC(2025, 9, 15, 9, 0, 0) + (this.sim?.M?.now() ?? 0) / 1000) });
@@ -49,7 +90,7 @@ export class CheckContext {
       this.record(pin);
     };
     this.sim.boot();
-    for (let p = 0; p < 40; p++) this.hist.set(p, [{ t: 0, v: 0 }]);
+    for (let p = 0; p < 40; p++) { const l = new PinLog(); l.push(0, 0); l.total = 0; this.hist.set(p, l); }
   }
 
   private level(pin: number): number {
@@ -60,10 +101,20 @@ export class CheckContext {
   }
 
   private record(pin: number) {
-    const arr = this.hist.get(pin)!;
+    const log = this.hist.get(pin)!;
     const v = this.level(pin);
-    const t = this.sim.M.now() / 1000;
-    if (arr[arr.length - 1].v !== v) arr.push({ t, v });
+    if (log.lastV() !== v) log.push(this.sim.M.now() / 1000, v);
+  }
+
+  /** Вывод, который переключается чаще всех: [gpio, переключений в секунду виртуального времени]. */
+  busiestPin(): [number, number] | null {
+    let best: [number, number] | null = null;
+    const secs = Math.max(0.001, this.now / 1000);
+    for (const [pin, log] of this.hist) {
+      const rate = log.total / secs;
+      if (!best || rate > best[1]) best = [pin, rate];
+    }
+    return best;
   }
 
   // ---------- время ----------
@@ -102,8 +153,8 @@ export class CheckContext {
   get serial(): string { return this.sim.serialLog; }
   serialLines(): string[] { return this.sim.serialLog.split(/\r?\n/).map((s) => s.trim()).filter(Boolean); }
   /** Вывод после момента — удобно: const mark = h.mark(); … h.serialSince(mark) */
-  mark(): number { return this.sim.serialLog.length; }
-  serialSince(mark: number): string { return this.sim.serialLog.slice(mark); }
+  mark(): number { return this.sim.serialDropped + this.sim.serialLog.length; }
+  serialSince(mark: number): string { return this.sim.serialLog.slice(Math.max(0, mark - this.sim.serialDropped)); }
   send(text: string) { this.sim.serialInput(text); }
   /** Числа, напечатанные в Serial (все подряд). */
   numbers(text = this.serial): number[] {
@@ -124,11 +175,19 @@ export class CheckContext {
   }
   /** История переключений выхода GPIO: [{t (мс), v}] */
   history(pin: number, from = 0, to = Infinity): Transition[] {
-    return (this.hist.get(pin) ?? []).filter((x) => x.t >= from && x.t <= to);
+    const log = this.hist.get(pin);
+    if (!log) return [];
+    const out: Transition[] = [];
+    for (let i = log.lower(from), end = log.lower(to, true); i < end; i++) out.push({ t: log.t[i], v: log.v[i] / 2 });
+    return out;
   }
   /** Число переключений за интервал. */
   toggles(pin: number, from: number, to: number): number {
-    return this.history(pin, from, to).length - (this.history(pin, from, to)[0]?.t === 0 ? 1 : 0);
+    const log = this.hist.get(pin);
+    if (!log) return 0;
+    const i = log.lower(from);
+    const n = log.lower(to, true) - i;
+    return n > 0 && log.t[i] === 0 ? n - 1 : n;
   }
   /** Средний период мигания (мс) по фронтам 0→1 в интервале. */
   period(pin: number, from: number, to: number): number | null {
@@ -138,16 +197,16 @@ export class CheckContext {
   }
   /** Доля времени во включённом состоянии в интервале. */
   dutyOver(pin: number, from: number, to: number): number {
-    const all = this.hist.get(pin) ?? [];
+    const log = this.hist.get(pin);
+    if (!log) return 0;
     let on = 0;
     let lastT = from;
-    let lastV = 0;
-    for (const x of all) {
-      if (x.t <= from) { lastV = x.v; continue; }
-      if (x.t >= to) break;
-      on += lastV * (x.t - lastT);
-      lastT = x.t;
-      lastV = x.v;
+    let i = log.lower(from, true);
+    let lastV = i > 0 ? log.v[i - 1] / 2 : 0;
+    for (; i < log.n && log.t[i] < to; i++) {
+      on += lastV * (log.t[i] - lastT);
+      lastT = log.t[i];
+      lastV = log.v[i] / 2;
     }
     on += lastV * (to - lastT);
     return on / (to - from);
@@ -264,23 +323,30 @@ export class Harness {
       return { compile, results: checks.map((c) => ({ id: c.id, title: c.title, ok: false, message: 'Скетч не компилируется' })) };
     }
     const results: CheckResult[] = [];
-    for (const c of checks) {
+    const started = Date.now();
+    const budget = opts.budgetMs ?? Infinity;
+    for (let k = 0; k < checks.length; k++) {
+      const c = checks[k];
+      // следующим проверкам оставляем по MIN_CHECK_MS (но не больше, чем им досталось бы поровну)
+      const left = budget - (Date.now() - started);
+      const later = checks.length - k - 1;
+      const own = c.timeoutMs ?? 20000;
+      const limit = Math.min(own, Math.max(left / (later + 1), left - later * MIN_CHECK_MS));
+      if (limit < Math.min(own, 1000)) {
+        results.push({ id: c.id, title: c.title, ok: false, message: 'Не проверено: предыдущие проверки исчерпали время. Сначала разберитесь с ними — скорее всего, программа слишком «тяжёлая» для симулятора' });
+        continue;
+      }
       let ctx: CheckContext | null = null;
       try {
         ctx = new CheckContext(code, circuit, compile, opts);
-        const limit = c.timeoutMs ?? 20000;
-        let timer: ReturnType<typeof setTimeout> | undefined;
-        const slow = (cx: CheckContext) => {
-          // частая причина — Serial.println в loop() без паузы: вывод растёт так быстро, что симуляция не успевает
-          const lines = cx.serialLines().length;
-          return lines > 2000
-            ? `Проверка заняла слишком много времени: программа напечатала в Serial ${lines} строк. Печатайте только при событии (например, в момент нажатия), а не на каждом проходе loop()`
-            : 'Проверка заняла слишком много времени';
-        };
         const cx = ctx;
+        // срок проверяется внутри симуляции (runUntil), таймер — запасной вариант для зависших проверок
+        cx.sim.deadline = Date.now() + limit;
+        cx.sim.deadlineError = () => new CheckFail(slowMessage(cx));
+        let timer: ReturnType<typeof setTimeout> | undefined;
         await Promise.race([
           c.run(cx),
-          new Promise((_, rej) => { timer = setTimeout(() => rej(new CheckFail(slow(cx))), limit); }),
+          new Promise((_, rej) => { timer = setTimeout(() => rej(new CheckFail(slowMessage(cx))), limit + 1000); }),
         ]).finally(() => clearTimeout(timer));
         ctx.assertAlive();
         results.push({ id: c.id, title: c.title, ok: true });
@@ -289,10 +355,35 @@ export class Harness {
         const panic = ctx?.sim.M?.panicInfo;
         if (!(e instanceof CheckFail) && panic) message = `Программа аварийно остановилась: ${panic.message} (строка ${panic.line})`;
         results.push({ id: c.id, title: c.title, ok: false, message });
+      } finally {
+        // если проверка ещё «доедает» время в фоне — остановить её
+        if (ctx) { ctx.sim.deadline = 0; ctx.sim.stop(); }
       }
     }
     return { compile, results };
   }
+}
+
+/** Минимум реального времени, оставляемый на каждую проверку при общем бюджете, мс. */
+const MIN_CHECK_MS = 3000;
+
+/** Почему проверка не уложилась во время: самые частые причины — понятным языком. */
+export function slowMessage(cx: CheckContext): string {
+  const head = 'Проверка не уложилась во время';
+  const secs = Math.max(0.001, cx.now / 1000);
+  const busy = cx.busiestPin();
+  if (busy && busy[1] > 2000) {
+    return `${head}: вывод GPIO${busy[0]} переключается ${Math.round(busy[1]).toLocaleString('ru-RU')} раз в секунду. ` +
+      'Похоже, за один проход loop() на него записываются разные значения (пропущен break в switch, два условия срабатывают одновременно, ' +
+      'digitalWrite(…, HIGH) и сразу digitalWrite(…, LOW)). Каждый сигнал должен включаться в одном месте программы';
+  }
+  const chars = cx.sim.serialDropped + cx.sim.serialLog.length;
+  if (chars / secs > 3000) {
+    return `${head}: программа без остановки печатает в Serial (${Math.round(chars / secs).toLocaleString('ru-RU')} символов в секунду). ` +
+      'Печатайте только при событии (например, когда значение изменилось) или не чаще нескольких раз в секунду';
+  }
+  return `${head}: симуляция идёт слишком медленно. Частая причина — loop() крутится без паузы и каждый раз делает лишнюю работу; ` +
+    'добавьте в конец loop() небольшую паузу, например delay(10)';
 }
 
 export type { HttpResponse };

@@ -99,7 +99,9 @@ export class CheckPool {
         job.reject(new CheckTimeout('timeout'));
         this.pump();
       }, this.timeoutMs);
-      slot.worker.postMessage({ id: job.id, practiceId: job.practiceId, code: job.code, circuit: job.circuit });
+      // поток сам делит время между проверками и укладывается раньше, чем сработает таймер выше
+      const budgetMs = Math.max(this.timeoutMs * 0.5, this.timeoutMs - 5000);
+      slot.worker.postMessage({ id: job.id, practiceId: job.practiceId, code: job.code, circuit: job.circuit, budgetMs });
     }
   }
 

@@ -5,6 +5,8 @@ import { Panic } from '../runtime/rt';
 import { glyph } from '../runtime/font';
 
 const G_LEAK = 1e-9;
+/** Пересчитывать схему при переключении выводов не чаще, чем раз в столько мкс виртуального времени. */
+const COALESCE_US = 50;
 const R_GPIO = 30;
 const R_PULL = 45000;
 
@@ -123,9 +125,16 @@ export abstract class Model {
   issues: string[] = [];
   /** номер версии визуального состояния */
   rev = 0;
+  /** электрическая модель зависит от напряжений прошлого решения — такую схему нельзя кэшировать */
+  static readonly vstamp: boolean = false;
+  private nets = new Map<string, number>();
   constructor(public sim: CircuitSim, public part: Part) {}
   get kind(): string { return this.part.type; }
-  net(pin: string): number { return this.sim.pinNet.get(`${this.part.id}:${pin}`) ?? -1; }
+  net(pin: string): number {
+    let n = this.nets.get(pin);
+    if (n === undefined) { n = this.sim.pinNet.get(`${this.part.id}:${pin}`) ?? -1; this.nets.set(pin, n); }
+    return n;
+  }
   prop<T = string | number | boolean>(k: string): T { return propValue(this.part, k) as T; }
   setProp(k: string, v: string | number | boolean) {
     this.part.props[k] = v;
@@ -366,6 +375,7 @@ class DhtModel extends Model {
 }
 
 class HcsrModel extends Model {
+  static readonly vstamp = true;
   echo = false;
   trigRise = -1;
   trigLevel = 0;
@@ -399,6 +409,7 @@ class HcsrModel extends Model {
 }
 
 class PirModel extends Model {
+  static readonly vstamp = true;
   activeUntil = -1;
   stamp(m: MNA) {
     if (this.powered('VCC', 'GND', 3.0)) m.srcRel(this.net('OUT'), this.net('GND'), this.active() ? 3.3 : 0, 100);
@@ -417,6 +428,7 @@ class PirModel extends Model {
 }
 
 class Mq2Model extends Model {
+  static readonly vstamp = true;
   stamp(m: MNA) {
     m.r(this.net('VCC'), this.net('GND'), 35);
     if (!this.powered('VCC', 'GND', 3.0)) return;
@@ -589,6 +601,7 @@ class LogicModel extends Model {
 }
 
 class UartBoxModel extends Model {
+  static readonly vstamp = true;
   txLevel = 1;
   counter = 0;
   received = '';
@@ -771,6 +784,24 @@ export class CircuitSim implements Board {
   netLoaded = new Uint8Array(0);
   relayClick?: (t: number) => void;
   overcurrent = new Set<number>();
+  /**
+   * Кэш решений по состоянию выводов ESP32. Программа, которая на каждом проходе loop()
+   * переключает вывод туда-обратно, иначе пересчитывает схему миллионы раз.
+   * Сбрасывается, когда меняется что-то кроме выводов (кнопка, реле, свойство компонента).
+   */
+  private cache = new Map<string, { V: CircuitSim['V']; floating: CircuitSim['floating']; on: boolean[]; i: number[] }>();
+  private cacheable = false;
+  private stampRev = 0;
+  private cacheRev = -1;
+  private lastDiodes: Diode[] = [];
+  /** выводы ESP32, подключённые к сетям (для ключа кэша) */
+  private keyPins: number[] = [];
+  /** есть ли сейчас хоть один вывод с ШИМ (иначе яркость не надо пересчитывать по ШИМ) */
+  private anyPwm = true;
+  /** сети, где важен каждый фронт (TRIG дальномера, каналы логического анализатора) */
+  private netEdge = new Uint8Array(0);
+  /** виртуальное время последнего пересчёта, мкс */
+  private lastSolveT = -Infinity;
 
   constructor(public doc: CircuitDoc) {
     this.build();
@@ -780,7 +811,7 @@ export class CircuitSim implements Board {
     this.M = M;
     M.board = this;
     for (const m of this.models.values()) { m.reset(); if (m instanceof UartBoxModel) m.start(); }
-    this.dirty = true;
+    this.markDirty();
   }
 
   // ---------- построение сетей ----------
@@ -872,7 +903,15 @@ export class CircuitSim implements Board {
     this.hasAnalyzer = this.doc.parts.some((p) => p.type === 'logic');
     this.V = new Float64Array(this.netCount);
     this.floating = new Uint8Array(this.netCount).fill(1);
-    this.dirty = true;
+    this.cacheable = ![...this.models.values()].some((m) => (m.constructor as typeof Model).vstamp);
+    this.keyPins = [...this.gpioNet].filter(([, n]) => n >= 0).map(([pin]) => pin);
+    const edge = new Uint8Array(this.netCount);
+    for (const m of this.models.values()) {
+      const pins = m instanceof HcsrModel ? ['TRIG'] : m instanceof LogicModel ? [0, 1, 2, 3, 4, 5, 6, 7].map((i) => `D${i}`) : [];
+      for (const pin of pins) { const n = m.net(pin); if (n >= 0) edge[n] = 1; }
+    }
+    this.netEdge = edge;
+    this.markDirty();
   }
 
   /** Перестроить после редактирования схемы, сохранив состояние моделей по id. */
@@ -885,7 +924,7 @@ export class CircuitSim implements Board {
       if (prev && prev.part.type === m.part.type) {
         // переносим динамическое состояние
         for (const k of Object.keys(prev)) {
-          if (k === 'sim' || k === 'part' || k === 'issues') continue;
+          if (k === 'sim' || k === 'part' || k === 'issues' || k === 'nets') continue;
           (m as unknown as Record<string, unknown>)[k] = (prev as unknown as Record<string, unknown>)[k];
         }
         m.part = doc.parts.find((p) => p.id === id)!;
@@ -897,7 +936,8 @@ export class CircuitSim implements Board {
 
   model<T extends Model = Model>(id: string): T | undefined { return this.models.get(id) as T | undefined; }
 
-  markDirty() { this.dirty = true; }
+  /** Изменилось состояние компонента (не выводов ESP32): пересчитать схему и сбросить кэш решений. */
+  markDirty() { this.dirty = true; this.stampRev++; }
 
   voltage(net: number): number { this.ensure(); return net >= 0 && net < this.V.length ? this.V[net] : 0; }
   isNetFloating(net: number): boolean { this.ensure(); return net < 0 || !!this.floating[net]; }
@@ -908,8 +948,16 @@ export class CircuitSim implements Board {
   gpioChanged(pin: number) {
     this.dirty = true;
     const n = this.gpioNet.get(pin);
-    if (n !== undefined && n >= 0 && this.netLoaded[n]) this.solveNow();
+    if (n === undefined || n < 0 || !this.netLoaded[n]) return;
+    // Частые переключения (вывод дёргается на каждом проходе loop()) склеиваем: пересчёт не чаще
+    // раза в COALESCE_US. Отложенное досчитается при чтении, ожидании или в конце кванта (tick).
+    // Где важен каждый фронт — прерывания, TRIG дальномера, анализатор — считаем сразу.
+    const M = this.M;
+    if (M && !this.netEdge[n] && M.now() - this.lastSolveT < COALESCE_US && !M.gpio.some((g) => g.isr)) return;
+    this.solveNow();
   }
+
+  settle() { if (this.dirty && !this.solving) this.solveNow(); }
 
   readDigital(pin: number): number {
     const n = this.gpioNet.get(pin);
@@ -1016,15 +1064,18 @@ export class CircuitSim implements Board {
 
   /** Множитель яркости для элемента между сетями a и k с учётом ШИМ. */
   pwmFactor(a: number, k: number): number {
-    const side = (net: number): number | null => {
-      const p = this.pwmOf(net);
-      if (p) return p.duty;
-      for (const nb of this.neighbors.get(net) ?? []) { const q = this.pwmOf(nb); if (q) return q.duty; }
-      return null;
-    };
-    const fa = side(a);
-    const fk = side(k);
+    const fa = this.pwmSide(a);
+    const fk = this.pwmSide(k);
     return (fa ?? 1) * (fk === null ? 1 : 1 - fk);
+  }
+
+  /** Заполнение ШИМ на сети или у её соседа через резистор. */
+  private pwmSide(net: number): number | null {
+    if (!this.anyPwm) return null;
+    const p = this.pwmOf(net);
+    if (p) return p.duty;
+    for (const nb of this.neighbors.get(net) ?? []) { const q = this.pwmOf(nb); if (q) return q.duty; }
+    return null;
   }
 
   gpioDriving(net: number): number | null {
@@ -1038,7 +1089,7 @@ export class CircuitSim implements Board {
     if (this.solving) return;
     this.solving = true;
     try {
-      this.solveInner();
+      this.solveCached();
     } finally {
       this.solving = false;
       this.dirty = false;
@@ -1047,6 +1098,8 @@ export class CircuitSim implements Board {
     const M = this.M;
     if (!M) return;
     const t = M.now();
+    this.lastSolveT = t;
+    this.anyPwm = M.gpio.some((g) => g.pwm !== null);
     for (const m of this.models.values()) m.update(t);
     // уровни для прерываний
     const onLevel = M.lib.onLevel as ((pin: number, lvl: number) => void) | undefined;
@@ -1062,8 +1115,39 @@ export class CircuitSim implements Board {
     if (this.dirty) {
       // модели изменили состояние (реле щёлкнуло) — пересчитываем ещё раз
       this.solving = true;
-      try { this.solveInner(); } finally { this.solving = false; this.dirty = false; }
+      try { this.solveCached(); } finally { this.solving = false; this.dirty = false; }
       for (const m of this.models.values()) m.update(t);
+    }
+  }
+
+  /** Ключ кэша: всё, что выводы ESP32 вносят в схему (см. stampBoard). */
+  private gpioKey(): string {
+    const M = this.M;
+    if (!M) return '';
+    let key = '';
+    for (const pin of this.keyPins) {
+      const g = M.gpio[pin];
+      key += String.fromCharCode(g.mode * 4 + (g.out ? 1 : 0) + (g.pwm && g.pwm.duty > 0 ? 2 : 0));
+      if (g.mode === 192 && g.dac !== null) key += String.fromCharCode(Math.round(g.dac * 1000) + 1024);
+    }
+    return key;
+  }
+
+  private solveCached() {
+    if (!this.cacheable || !this.M) { this.solveInner(); return; }
+    if (this.cacheRev !== this.stampRev) { this.cache.clear(); this.cacheRev = this.stampRev; }
+    const key = this.gpioKey();
+    const hit = this.cache.get(key);
+    if (hit) {
+      this.V = hit.V;
+      this.floating = hit.floating;
+      for (let i = 0; i < this.lastDiodes.length; i++) { this.lastDiodes[i].on = hit.on[i]; this.lastDiodes[i].i = hit.i[i]; }
+      return;
+    }
+    this.solveInner();
+    // во время решения могло что-то измениться (короткое замыкание) — тогда не запоминаем
+    if (this.cacheRev === this.stampRev && this.cache.size < 256) {
+      this.cache.set(key, { V: this.V, floating: this.floating, on: this.lastDiodes.map((d) => d.on), i: this.lastDiodes.map((d) => d.i) });
     }
   }
 
@@ -1074,6 +1158,7 @@ export class CircuitSim implements Board {
     for (let i = 0; i < n; i++) idx[i] = i === this.gnd ? -1 : k++;
     const diodes: Diode[] = [];
     for (const m of this.models.values()) diodes.push(...m.diodes());
+    this.lastDiodes = diodes;
     let mna: MNA = new MNA(idx, k);
     let x: Float64Array<ArrayBufferLike> = new Float64Array(k);
     const volt = (net: number) => (net < 0 || net === this.gnd ? 0 : x[idx[net]]);

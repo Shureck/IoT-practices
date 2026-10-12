@@ -30,6 +30,9 @@ export interface SimOptions {
   compiled?: CompileOutput;
 }
 
+/** Сколько последних символов вывода Serial хранить для проверок. */
+const SERIAL_KEEP = 200_000;
+
 type Program = { init: GenFn; setup: GenFn | null; loop: GenFn | null };
 type Factory = (M: Machine, R: unknown, L: unknown, F: unknown) => Program;
 
@@ -41,9 +44,14 @@ export class Simulation {
   nvs: Map<string, Map<string, unknown>>;
   private factory: Factory | null = null;
   boots = 0;
-  /** накопленный вывод Serial (для проверок) */
+  /** накопленный вывод Serial (для проверок): последние SERIAL_KEEP…2·SERIAL_KEEP символов */
   serialLog = '';
+  /** сколько символов вывода отброшено с начала (отметки в журнале — абсолютные) */
+  serialDropped = 0;
   warnings: { msg: string; hint?: string; t: number }[] = [];
+  /** крайний срок прогона (Date.now(), мс) — после него runUntil бросает deadlineError() */
+  deadline: number | null = null;
+  deadlineError?: () => Error;
 
   constructor(public opts: SimOptions) {
     this.compiled = opts.compiled ?? compileSketch(opts.code);
@@ -71,7 +79,15 @@ export class Simulation {
     const cb = this.opts.callbacks ?? {};
     M.ev = {
       serial: (port: number, text: string, baud?: number) => {
-        if (port === 0) this.serialLog = (this.serialLog + text).slice(-200000);
+        if (port === 0) {
+          // конкатенация строк в V8 — O(1); обрезаем редко, чтобы не копировать журнал на каждый print
+          this.serialLog += text;
+          if (this.serialLog.length > 2 * SERIAL_KEEP) {
+            const drop = this.serialLog.length - SERIAL_KEEP;
+            this.serialLog = this.serialLog.slice(drop);
+            this.serialDropped += drop;
+          }
+        }
         cb.serial?.(port, text, baud);
       },
       warn: (msg: string, hint?: string) => { this.warnings.push({ msg, hint, t: M.now() }); cb.warn?.(msg, hint); },
@@ -122,9 +138,12 @@ export class Simulation {
   }
 
   /** Безголовый прогон до момента ms (от включения) — для автопроверки. */
-  async runUntil(ms: number, maxRealMs = 20000): Promise<void> {
-    const started = Date.now();
+  async runUntil(ms: number, maxRealMs?: number): Promise<void> {
+    // общий срок (deadline) задаёт автопроверка; без него — не дольше maxRealMs на один вызов
+    const until = this.deadline ?? Date.now() + (maxRealMs ?? 20000);
+    const overdue = () => this.deadlineError?.() ?? new Panic('Timeout', 'Симуляция заняла слишком много времени');
     const target = ms * 1000;
+    if (Date.now() > until) throw overdue();
     await Promise.resolve();
     for (;;) {
       const M = this.M;
@@ -134,14 +153,14 @@ export class Simulation {
         return;
       }
       if (M.t >= target) return;
-      const r = M.run(target, 250);
+      const r = M.run(target, Math.max(1, Math.min(250, until - Date.now())));
       if (r === 'async') {
         if (M.pending.size) await Promise.race([...M.pending]);
         else await new Promise((res) => setTimeout(res, 0));
       } else if (r === 'budget') {
         await new Promise((res) => setTimeout(res, 0));
       }
-      if (Date.now() - started > maxRealMs) throw new Panic('Timeout', 'Симуляция заняла слишком много времени');
+      if (Date.now() > until) throw overdue();
     }
   }
 

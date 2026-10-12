@@ -82,6 +82,8 @@ export interface Board {
   i2cDevices(sda: number, scl: number): Map<number, I2CDevice>;
   /** вызов после каждого кванта выполнения */
   tick(t: number): void;
+  /** досчитать отложенные изменения схемы — перед активным ожиданием (delayMicroseconds, Serial) */
+  settle?(): void;
   /** запись «осциллограммы» вывода для логического анализатора */
   logBits(gpio: number, events: [number, number][]): void;
   /** UART: байты, переданные ESP32 по выводу TX */

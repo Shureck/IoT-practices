@@ -333,6 +333,7 @@ export function createCore(M: Machine) {
     },
     *delayMicroseconds(us: number) {
       // активное ожидание без переключения задач
+      M.board?.settle?.();
       M.ops += Math.max(0, Math.trunc(us) >>> 0) / 0.25;
     },
     millis: () => Math.floor(M.now() / 1000) >>> 0,

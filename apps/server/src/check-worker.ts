@@ -8,6 +8,8 @@ export interface CheckTask {
   practiceId: string;
   code: string;
   circuit: CircuitDoc;
+  /** общий бюджет реального времени на все проверки практики, мс */
+  budgetMs?: number;
 }
 
 export interface CheckOutcome {
@@ -21,7 +23,7 @@ parentPort?.on('message', async (task: CheckTask) => {
   try {
     const practice = PRACTICE_BY_ID[task.practiceId];
     if (!practice) throw new Error(`Практика ${task.practiceId} не найдена`);
-    const r = await Harness.run(task.code, task.circuit, practice.checks, { net: practice.net });
+    const r = await Harness.run(task.code, task.circuit, practice.checks, { net: practice.net, budgetMs: task.budgetMs });
     const outcome: CheckOutcome = {
       compile: { ok: r.compile.ok, diagnostics: r.compile.diagnostics ?? [] },
       results: r.results.map((x) => ({ id: x.id, title: x.title, ok: x.ok, ...(x.message ? { message: x.message } : {}) })),

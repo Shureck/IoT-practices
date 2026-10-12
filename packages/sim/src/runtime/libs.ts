@@ -1,7 +1,7 @@
 // Библиотеки периферии: Serial, DHT, Servo, LCD, OLED, NeoPixel, Preferences,
 // Wire, SPI, ESP, регистры GPIO, Ticker.
 import type { Core } from './core';
-import { Machine, type GenFn } from './machine';
+import { Machine, US_PER_OP, type GenFn } from './machine';
 import { Panic, cs, format, printText } from './rt';
 import { glyph, utf8Bytes } from './font';
 
@@ -25,6 +25,9 @@ export interface LcdModel {
 }
 export interface OledModel { powered(): boolean; show(buf: Uint8Array, w: number, h: number): void; invert(on: boolean): void; dim(on: boolean): void }
 export interface NeoModel { show(colors: number[]): void; powered(): boolean }
+
+/** Буфер передачи UART у ESP32 (аппаратный FIFO), байт. */
+const TX_BUFFER = 128;
 
 export function createLibs(M: Machine, F: Core) {
   // ======================= Serial =======================
@@ -53,16 +56,33 @@ export function createLibs(M: Machine, F: Core) {
     setDebugOutput() { /* ничего */ }
     setRxBufferSize(n: number) { return n; }
     onReceive() { /* ничего */ }
+    /** момент (мкс), когда опустеет буфер передачи */
+    txFreeAt = 0;
+    /** длительность передачи одного байта (8N1 — 10 бит), мкс */
+    private byteUs() { return 10e6 / (this.baud > 0 ? this.baud : 115200); }
+    /**
+     * Передача как у настоящего UART: байты уходят со скоростью baud/10 в секунду,
+     * в буфер помещается TX_BUFFER байт — когда он полон, print ждёт (активно, как Serial.write).
+     */
+    private transmit(n: number) {
+      const byteUs = this.byteUs();
+      const now = M.now();
+      this.txFreeAt = Math.max(now, this.txFreeAt) + n * byteUs;
+      const wait = this.txFreeAt - TX_BUFFER * byteUs - now;
+      if (wait > 0) { M.board?.settle?.(); M.ops += wait / US_PER_OP; }
+    }
     private out(text: string): number {
       if (!this.begun) {
         M.warnOnce(`serial-begin-${this.port}`, `Serial${this.port || ''}.print без Serial${this.port || ''}.begin() — данные никуда не уходят`, `Добавьте в setup(): Serial${this.port || ''}.begin(115200);`);
         return 0;
       }
+      const bytes = utf8Bytes(text);
       M.ops += 2 + text.length / 4;
+      this.transmit(bytes.length);
       M.ev.serial?.(this.port, text, this.baud);
-      if (this.port !== 0 && M.board) M.board.uartTx(this.txPin, utf8Bytes(text), this.baud);
-      else if (this.port === 0 && M.board?.hasAnalyzer) M.board.uartTx(1, utf8Bytes(text), this.baud);
-      return utf8Bytes(text).length;
+      if (this.port !== 0 && M.board) M.board.uartTx(this.txPin, bytes, this.baud);
+      else if (this.port === 0 && M.board?.hasAnalyzer) M.board.uartTx(1, bytes, this.baud);
+      return bytes.length;
     }
     print(v: unknown, fmt?: unknown) { return this.out(printText(v, fmt)); }
     println(v?: unknown, fmt?: unknown) { return this.out((v === undefined ? '' : printText(v, fmt)) + '\r\n'); }
@@ -75,8 +95,15 @@ export function createLibs(M: Machine, F: Core) {
       }
       return this.out(cs(v));
     }
-    flush() { /* ничего */ }
-    availableForWrite() { return 128; }
+    /** дождаться, пока буфер передачи опустеет */
+    flush() {
+      const wait = this.txFreeAt - M.now();
+      if (wait > 0) { M.board?.settle?.(); M.ops += wait / US_PER_OP; }
+    }
+    availableForWrite() {
+      const queued = Math.ceil(Math.max(0, this.txFreeAt - M.now()) / this.byteUs());
+      return Math.max(0, TX_BUFFER - queued);
+    }
     receive(bytes: number[]) {
       for (const b of bytes) if (this.rx.length < 256) this.rx.push(b & 255);
     }

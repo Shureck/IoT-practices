@@ -33,4 +33,24 @@ describe('пул проверок', () => {
       await t.close();
     }
   });
+
+  it('тяжёлая программа укладывается в бюджет: у каждой проверки своё сообщение', async () => {
+    const t = await makeApp({ checkTimeoutMs: 8_000 });
+    try {
+      const { c } = await registered(t.app);
+      const traffic = PRACTICE_BY_ID['m1-traffic'];
+      // жёлтый дёргается на каждом проходе loop(), а Serial печатает без паузы
+      const heavy = `void setup() { Serial.begin(115200); pinMode(25, OUTPUT); pinMode(26, OUTPUT); pinMode(27, OUTPUT); pinMode(32, OUTPUT); pinMode(33, OUTPUT); }
+void loop() { digitalWrite(26, HIGH); digitalWrite(26, LOW); Serial.println(millis()); }`;
+      const t0 = Date.now();
+      const r = await c.post('/api/check', { practiceId: 'm1-traffic', code: heavy, circuit: traffic.starterCircuit });
+      expect(Date.now() - t0).toBeLessThan(8_000);
+      expect(r.status).toBe(200);
+      expect(r.body.results).toHaveLength(traffic.checks.length);
+      expect(r.body.results.every((x: { ok: boolean }) => !x.ok)).toBe(true);
+      expect(r.body.results.some((x: { message: string }) => /возможно, программа зависла/.test(x.message))).toBe(false);
+    } finally {
+      await t.close();
+    }
+  });
 });
