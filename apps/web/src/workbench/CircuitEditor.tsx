@@ -57,6 +57,7 @@ export function CircuitEditor() {
   const probes = useWB((s) => s.probes);
   const probePick = useWB((s) => s.probePick);
   const svgRef = useRef<SVGSVGElement>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
   const [view, setView] = useState<View>({ x: 0, y: 0, k: 2 });
   const [cursor, setCursor] = useState<[number, number] | null>(null);
   const [hoverPin, setHoverPin] = useState<{ ref: PinRef; x: number; y: number } | null>(null);
@@ -147,6 +148,15 @@ export function CircuitEditor() {
   }, []);
 
   // ---------- указатель ----------
+  // Клик по схеме: забрать фокус у редактора кода (иначе Delete/Backspace сотрут выделенный код —
+  // Safari не снимает фокус при клике по SVG) и не давать браузеру выделять текст при перетаскивании.
+  const takeFocus = () => {
+    const ae = document.activeElement as HTMLElement | null;
+    if (ae && ae !== rootRef.current && (ae.closest('.cm-editor') || ae.isContentEditable)) ae.blur();
+    rootRef.current?.focus({ preventScroll: true });
+    window.getSelection()?.removeAllRanges();
+  };
+
   const onBgDown = (e: React.PointerEvent) => {
     if (e.button === 2) { set({ draft: null }); return; }
     (e.target as Element).setPointerCapture?.(e.pointerId);
@@ -362,10 +372,12 @@ export function CircuitEditor() {
   const gridSize = SNAP * view.k;
 
   return (
-    <div className="relative h-full w-full overflow-hidden select-none" style={{ background: 'var(--canvas)' }}>
+    <div ref={rootRef} tabIndex={-1} className="relative h-full w-full overflow-hidden select-none outline-none" style={{ background: 'var(--canvas)' }}>
       <svg
         ref={svgRef}
         className="h-full w-full touch-none"
+        onPointerDownCapture={takeFocus}
+        onMouseDown={(e) => e.preventDefault()}
         onPointerDown={onBgDown}
         onPointerMove={onMove}
         onPointerUp={onUp}

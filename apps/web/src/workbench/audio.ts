@@ -4,11 +4,30 @@ import type { CircuitDoc } from '@esp32lab/sim';
 class AudioEngine {
   ctx: AudioContext | null = null;
   voices = new Map<string, { osc: OscillatorNode; gain: GainNode; freq: number }>();
+  private unlocked = false;
 
+  /**
+   * Включить звук. Вызывать из обработчика действия пользователя (клик, клавиша): Safari и iOS
+   * разрешают звук, только если контекст создан/возобновлён и что-то проиграно внутри такого действия.
+   */
   resume() {
     try {
-      if (!this.ctx) this.ctx = new AudioContext();
-      if (this.ctx.state === 'suspended') void this.ctx.resume();
+      if (!this.ctx) {
+        const AC = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+        if (!AC) return;
+        this.ctx = new AC();
+      }
+      const ctx = this.ctx;
+      if (ctx.state !== 'running') void ctx.resume().catch(() => undefined);
+      if (!this.unlocked || ctx.state !== 'running') {
+        // «разблокировка» для Safari: проиграть пустой звук в момент действия пользователя
+        const buf = ctx.createBuffer(1, 1, 22050);
+        const src = ctx.createBufferSource();
+        src.buffer = buf;
+        src.connect(ctx.destination);
+        src.start(0);
+        this.unlocked = true;
+      }
     } catch { /* нет звука */ }
   }
 
@@ -51,3 +70,10 @@ class AudioEngine {
 }
 
 export const audio = new AudioEngine();
+
+// Любое действие пользователя снова «будит» звук (Safari может приостановить его, например
+// после переключения вкладки); создаём контекст только когда он уже понадобился.
+if (typeof window !== 'undefined') {
+  const wake = () => { if (audio.ctx && audio.ctx.state !== 'running') audio.resume(); };
+  for (const ev of ['pointerdown', 'keydown', 'touchend']) window.addEventListener(ev, wake, { capture: true, passive: true });
+}
