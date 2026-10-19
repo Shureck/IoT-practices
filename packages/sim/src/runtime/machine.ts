@@ -86,8 +86,8 @@ export interface Board {
   settle?(): void;
   /** запись «осциллограммы» вывода для логического анализатора */
   logBits(gpio: number, events: [number, number][]): void;
-  /** UART: байты, переданные ESP32 по выводу TX */
-  uartTx(txPin: number, bytes: number[], baud: number): void;
+  /** UART: байты, переданные ESP32 по выводу TX (t0 — начало передачи, мкс) */
+  uartTx(txPin: number, bytes: number[], baud: number, t0?: number): void;
   hasAnalyzer: boolean;
 }
 

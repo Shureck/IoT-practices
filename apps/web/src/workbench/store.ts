@@ -6,13 +6,22 @@ import {
 } from '@esp32lab/sim';
 import type { PublicPractice } from '../lib/api';
 
-export type BottomTab = 'serial' | 'plotter' | 'analyzer' | 'network' | 'mqtt' | 'chat' | 'browser' | 'problems' | 'board';
+export type BottomTab = 'serial' | 'plotter' | 'scope' | 'analyzer' | 'network' | 'mqtt' | 'chat' | 'browser' | 'problems' | 'board';
 
 export interface SerialChunk { text: string; baud: number; t: number; port: number }
 
 export type Selection = { kind: 'part' | 'wire'; id: string } | null;
 
 export interface Draft { from: PinRef; pts: [number, number][] }
+
+/** Цвета каналов осциллографа (как у настоящих приборов). */
+export const SCOPE_COLORS = ['#facc15', '#22d3ee', '#f472b6', '#4ade80'];
+
+/** Поставить щуп канала ch на точку схемы (или снять: null). */
+export function setProbe(ch: number, ref: PinRef | null) {
+  const s = useWB.getState();
+  s.set({ probes: s.probes.map((x, i) => (i === ch ? ref : x)), probePick: null });
+}
 
 export interface WBState {
   mode: 'practice' | 'sandbox' | 'review';
@@ -57,6 +66,10 @@ export interface WBState {
   muted: boolean;
   /** растёт при каждой загрузке новой схемы (для подгонки вида) */
   loadSeq: number;
+  /** щупы осциллографа по каналам: точка схемы «деталь:вывод» (null — канал от детали «Осциллограф» или свободен) */
+  probes: (PinRef | null)[];
+  /** канал, для которого сейчас выбирают точку на схеме */
+  probePick: number | null;
 
   init(p: Partial<WBState>): void;
   setCode(code: string): void;
@@ -127,13 +140,15 @@ export const useWB = create<WBState>((set, get) => ({
   dirty: false,
   muted: false,
   loadSeq: 0,
+  probes: [null, null, null, null],
+  probePick: null,
 
   init(p) {
     set({
       sel: null, draft: null, undo: [], redo: [], running: false, paused: false, simTime: 0, serial: [], serialRev: 0,
       warnings: [], panic: null, views: {}, netLog: [], checkResults: null, checking: false, aiHelp: { status: 'idle' }, hintsUsed: 0, quizAnswers: [],
       dirty: false, diagnostics: [], compileOk: true, status: 'idle', readOnly: false, circuitLocked: false, palette: null,
-      practice: null, title: '', ...p, loadSeq: get().loadSeq + 1,
+      practice: null, title: '', probes: [null, null, null, null], probePick: null, ...p, loadSeq: get().loadSeq + 1,
     });
     const c = compileSketch(get().code);
     set({ diagnostics: c.diagnostics, compileOk: c.ok });

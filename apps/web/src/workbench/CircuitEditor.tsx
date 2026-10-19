@@ -5,7 +5,7 @@ import { Maximize2, Minus, Plus, AlertTriangle } from 'lucide-react';
 import { PartView } from './parts';
 import { Junction, WireShape } from './Wire';
 import { PropInput } from './Sidebar';
-import { useWB } from './store';
+import { SCOPE_COLORS, setProbe, useWB } from './store';
 import { modelOf, partAction, setLiveProp, syncCircuit } from './simController';
 
 interface View { x: number; y: number; k: number }
@@ -54,6 +54,8 @@ export function CircuitEditor() {
   const readOnly = useWB((s) => s.readOnly);
   const locked = useWB((s) => s.circuitLocked);
   const set = useWB((s) => s.set);
+  const probes = useWB((s) => s.probes);
+  const probePick = useWB((s) => s.probePick);
   const svgRef = useRef<SVGSVGElement>(null);
   const [view, setView] = useState<View>({ x: 0, y: 0, k: 2 });
   const [cursor, setCursor] = useState<[number, number] | null>(null);
@@ -151,7 +153,16 @@ export function CircuitEditor() {
     drag.current = { kind: 'pan', sx: e.clientX, sy: e.clientY, ox: view.x, oy: view.y, moved: false };
   };
 
+  // выбор точки для щупа осциллографа: Esc — отмена
+  useEffect(() => {
+    if (probePick === null) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') set({ probePick: null }); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [probePick, set]);
+
   const onPartDown = (e: React.PointerEvent, p: Part) => {
+    if (useWB.getState().probePick !== null) { e.stopPropagation(); return; }
     e.stopPropagation();
     if (e.button !== 0) return;
     (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
@@ -182,6 +193,8 @@ export function CircuitEditor() {
 
   const onPinDown = (e: React.PointerEvent, ref: PinRef) => {
     e.stopPropagation();
+    const pick = useWB.getState().probePick;
+    if (pick !== null) { setProbe(pick, ref); return; }
     if (!canEdit && !(readOnly === false && !locked)) return;
     if (!canEdit) return;
     const d = useWB.getState().draft;
@@ -196,6 +209,15 @@ export function CircuitEditor() {
 
   const onWireDown = (e: React.PointerEvent, id: string) => {
     e.stopPropagation();
+    const pick = useWB.getState().probePick;
+    if (pick !== null) {
+      // провод — одна сеть: щуп ставим на его конец (не на плату, если можно: подпись понятнее)
+      const { circuit: c } = useWB.getState();
+      const w = c.wires.find((x) => x.id === id);
+      const isEsp = (r: PinRef) => c.parts.find((p) => p.id === r.part)?.type === 'esp32';
+      if (w) setProbe(pick, isEsp(w.a) && !isEsp(w.b) ? w.b : w.a);
+      return;
+    }
     if (useWB.getState().draft) return;
     set({ sel: { kind: 'wire', id } });
   };
@@ -446,8 +468,29 @@ export function CircuitEditor() {
               </g>
             );
           })}
+          {/* щупы осциллографа */}
+          {probes.map((ref, i) => {
+            const p = ref ? pinAt(ref) : null;
+            if (!p) return null;
+            return (
+              <g key={`probe${i}`} pointerEvents="none">
+                <line x1={p.x} y1={p.y} x2={p.x + 9} y2={p.y - 13} stroke={SCOPE_COLORS[i]} strokeWidth={1.4} />
+                <circle cx={p.x} cy={p.y} r={2.2} fill="none" stroke={SCOPE_COLORS[i]} strokeWidth={1.2} />
+                <rect x={p.x + 6} y={p.y - 21} width={13} height={9} rx={2.5} fill={SCOPE_COLORS[i]} />
+                <text x={p.x + 12.5} y={p.y - 14.6} fontSize={6.5} fontWeight={700} textAnchor="middle" fill="#05080f" fontFamily="Inter">{i + 1}</text>
+              </g>
+            );
+          })}
         </g>
       </svg>
+
+      {probePick !== null && (
+        <div className="absolute left-1/2 top-2 z-20 -translate-x-1/2 rounded-lg border px-3 py-1.5 text-[12.5px] shadow-lg"
+          style={{ borderColor: SCOPE_COLORS[probePick], background: 'var(--panel)' }}>
+          <b style={{ color: SCOPE_COLORS[probePick] }}>Щуп CH{probePick + 1}:</b> кликните по проводу или выводу, который хотите смотреть
+          <button className="ml-2 text-muted hover:text-text" onClick={() => set({ probePick: null })}>отмена (Esc)</button>
+        </div>
+      )}
 
       {/* подсказка по выводу */}
       {hoverPin && (() => {

@@ -1,7 +1,7 @@
-// Логический анализатор: осциллограммы 8 каналов + декодер UART.
+// Логический анализатор: 8 цифровых каналов (с аппаратным ШИМ), синхронизация по фронту, декодер UART.
 import { useEffect, useRef, useState } from 'react';
 import { ZoomIn, ZoomOut, Pause, Play } from 'lucide-react';
-import type { AnalyzerTrace } from '@esp32lab/sim';
+import { columns, type AnalyzerTrace, type Waveform } from '@esp32lab/sim';
 import { useWB } from '../store';
 import { modelOf } from '../simController';
 import { Empty, IconButton, inputCls, inputBase } from '../../components/ui';
@@ -40,12 +40,15 @@ export function AnalyzerPanel() {
   const [follow, setFollow] = useState(true);
   const [frozenEnd, setFrozenEnd] = useState(0);
   const [decode, setDecode] = useState<number>(0);
+  /** синхронизация: канал (-1 — выкл.) и направление */
+  const [trig, setTrig] = useState<{ ch: number; edge: 'rise' | 'fall' }>({ ch: -1, edge: 'rise' });
+  const [trigState, setTrigState] = useState('');
   const logic = circuit.parts.find((p) => p.type === 'logic');
 
   useEffect(() => {
     const c = canvas.current;
     if (!c || !logic) return;
-    const m = modelOf(logic.id) as { traces: AnalyzerTrace[] } | undefined;
+    const m = modelOf(logic.id) as { traces: AnalyzerTrace[]; waves: Waveform[] } | undefined;
     const dpr = window.devicePixelRatio || 1;
     const w = c.clientWidth; const h = c.clientHeight;
     c.width = w * dpr; c.height = h * dpr;
@@ -55,7 +58,17 @@ export function AnalyzerPanel() {
     const css = getComputedStyle(document.documentElement);
     const muted = css.getPropertyValue('--muted');
     const grid = css.getPropertyValue('--grid');
-    const end = follow ? simTime : frozenEnd;
+    let end = follow ? simTime : frozenEnd;
+    // синхронизация: последний фронт канала — в середине экрана
+    let trigAt: number | null = null;
+    if (follow && trig.ch >= 0 && m?.waves) {
+      const w = m.waves[trig.ch];
+      trigAt = w.empty ? null : w.lastEdge(simTime - span / 2, Math.max(w.start, simTime - 20 * span), 1.5, trig.edge, span);
+      if (trigAt !== null) end = trigAt + span / 2;
+    }
+    const st = trig.ch < 0 ? '' : !follow ? '' : trigAt !== null ? 'синхр.' : 'нет фронта';
+    if (st !== trigState) setTrigState(st);
+    if (!follow && trig.ch >= 0) trigAt = null;
     const start = end - span;
     const left = 46;
     const rowH = (h - 22) / 8;
@@ -75,25 +88,28 @@ export function AnalyzerPanel() {
       const hi = y0 + rowH * 0.18; const lo = y0 + rowH * 0.78;
       ctx.fillStyle = CH_COLORS[ch]; ctx.textAlign = 'left';
       ctx.fillText(`D${ch}`, 8, (hi + lo) / 2 + 4);
-      if (!tr || !tr.t.length) {
+      const wave = m?.waves?.[ch];
+      const dataEnd = Math.min(end, simTime);
+      if (!wave || wave.empty || dataEnd <= start) {
         ctx.strokeStyle = grid; ctx.beginPath(); ctx.moveTo(left, lo); ctx.lineTo(w - 8, lo); ctx.stroke();
         continue;
       }
+      // по столбцам: быстрый ШИМ на крупной развёртке — сплошная полоса, вблизи — прямоугольники
+      const plotW = w - left - 8;
+      const n = Math.max(1, Math.round((plotW * (dataEnd - start)) / span));
+      const col = columns(wave, start, dataEnd, n);
+      const yOf = (v: number) => (v > 1.5 ? hi : lo);
       ctx.strokeStyle = CH_COLORS[ch]; ctx.lineWidth = 1.5; ctx.beginPath();
-      let lvl = levelAt(tr, start);
-      ctx.moveTo(left, lvl ? hi : lo);
-      for (let i = 0; i < tr.t.length; i++) {
-        const t = tr.t[i];
-        if (t < start) continue;
-        if (t > end) break;
-        const xx = x(t);
-        ctx.lineTo(xx, lvl ? hi : lo);
-        lvl = tr.v[i];
-        ctx.lineTo(xx, lvl ? hi : lo);
+      let pen = false;
+      for (let j = 0; j < n; j++) {
+        if (Number.isNaN(col.min[j])) { pen = false; continue; }
+        const xx = left + ((j + 0.5) * plotW) / Math.max(1, Math.round(plotW));
+        if (!pen) { ctx.moveTo(xx, yOf(col.first[j])); pen = true; } else ctx.lineTo(xx, yOf(col.first[j]));
+        if (col.min[j] <= 1.5 && col.max[j] > 1.5) { ctx.lineTo(xx, lo); ctx.lineTo(xx, hi); }
+        ctx.lineTo(xx, yOf(col.last[j]));
       }
-      ctx.lineTo(w - 8, lvl ? hi : lo);
       ctx.stroke();
-      if (decode) {
+      if (decode && tr) {
         for (const f of decodeUart(tr, decode, start, end)) {
           const x0 = x(f.t); const x1 = x(f.t + (10 * 1e6) / decode);
           if (x1 - x0 < 14) continue;
@@ -104,7 +120,12 @@ export function AnalyzerPanel() {
         }
       }
     }
-  }, [simTime, span, follow, frozenEnd, decode, logic, circuit]);
+    if (trigAt !== null) {
+      const xx = x(trigAt);
+      ctx.fillStyle = '#fb923c';
+      ctx.beginPath(); ctx.moveTo(xx - 5, 0); ctx.lineTo(xx + 5, 0); ctx.lineTo(xx, 7); ctx.closePath(); ctx.fill();
+    }
+  }, [simTime, span, follow, frozenEnd, decode, logic, circuit, trig, trigState]);
 
   if (!logic) {
     return <Empty icon="📊" title="Логический анализатор не подключён" text="Добавьте на схему компонент «Логический анализатор» и подключите его входы D0…D7 к выводам — здесь появятся осциллограммы UART, SPI, I²C и ШИМ." />;
@@ -116,6 +137,18 @@ export function AnalyzerPanel() {
         <IconButton title="Растянуть" onClick={() => setSpan((s) => Math.max(50, s / 2))}><ZoomIn size={15} /></IconButton>
         <IconButton title="Сжать" onClick={() => setSpan((s) => Math.min(5e6, s * 2))}><ZoomOut size={15} /></IconButton>
         <span className="font-mono text-xs text-muted">окно {span >= 1000 ? `${span / 1000} мс` : `${span} мкс`}</span>
+        <span className="ml-2 text-xs text-muted">Синхр.:</span>
+        <select className={`${inputBase} h-7 w-[72px] px-1.5 text-xs`} value={trig.ch} onChange={(e) => setTrig({ ...trig, ch: Number(e.target.value) })} title="Канал, по фронту которого «замирает» картинка">
+          <option value={-1}>выкл.</option>
+          {Array.from({ length: 8 }, (_, i) => <option key={i} value={i}>D{i}</option>)}
+        </select>
+        {trig.ch >= 0 && (
+          <select className={`${inputBase} h-7 w-[64px] px-1.5 text-xs`} value={trig.edge} onChange={(e) => setTrig({ ...trig, edge: e.target.value as 'rise' | 'fall' })}>
+            <option value="rise">↑ фронт</option>
+            <option value="fall">↓ спад</option>
+          </select>
+        )}
+        {trigState && <span className={`text-xs ${trigState === 'синхр.' ? 'text-ok' : 'text-warn'}`}>{trigState}</span>}
         <span className="ml-auto text-xs text-muted">Декодер UART:</span>
         <select className={`${inputBase} h-7 w-28 px-1.5 text-xs`} value={decode} onChange={(e) => setDecode(Number(e.target.value))}>
           <option value={0}>выкл.</option>

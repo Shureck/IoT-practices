@@ -3,6 +3,7 @@ import { DEFS, pinPos, propValue, type CircuitDoc, type Part } from './defs';
 import type { Board, I2CDevice, Machine } from '../runtime/machine';
 import { Panic } from '../runtime/rt';
 import { glyph } from '../runtime/font';
+import { Waveform } from '../instruments/waveform';
 
 const G_LEAK = 1e-9;
 /** Пересчитывать схему при переключении выводов не чаще, чем раз в столько мкс виртуального времени. */
@@ -568,8 +569,14 @@ class NeoModel extends Model {
 
 export interface AnalyzerTrace { t: number[]; v: number[] }
 
+/** Кэш нижнего уровня ШИМ для канала прибора. */
+interface LowCache { key: string; v: number }
+
 class LogicModel extends Model {
   traces: AnalyzerTrace[] = Array.from({ length: 8 }, () => ({ t: [], v: [] }));
+  /** запись для отрисовки: в отличие от traces, хранит аппаратный ШИМ */
+  waves = Array.from({ length: 8 }, () => new Waveform());
+  private lows: LowCache[] = Array.from({ length: 8 }, () => ({ key: '', v: 0 }));
   lastLevel = new Array(8).fill(-1);
   stamp(m: MNA) { for (let i = 0; i < 8; i++) m.r(this.net(`D${i}`), this.net('GND'), 1e6, false); }
   record(ch: number, t: number, v: number) {
@@ -589,6 +596,7 @@ class LogicModel extends Model {
       if (n < 0) continue;
       const v = this.sim.isNetFloating(n) ? 0 : this.sim.voltage(n) > 1.5 ? 1 : 0;
       if (v !== this.lastLevel[i]) { this.lastLevel[i] = v; this.record(i, t, v); }
+      this.sim.recordProbe(this.waves[i], n, -1, t, this.lows[i]);
     }
   }
   channelsForNet(net: number): number[] {
@@ -597,7 +605,35 @@ class LogicModel extends Model {
     return r;
   }
   view() { return { rev: this.rev }; }
-  reset() { this.traces = Array.from({ length: 8 }, () => ({ t: [], v: [] })); this.lastLevel.fill(-1); }
+  reset() {
+    this.traces = Array.from({ length: 8 }, () => ({ t: [], v: [] }));
+    this.waves = Array.from({ length: 8 }, () => new Waveform());
+    this.lows = Array.from({ length: 8 }, () => ({ key: '', v: 0 }));
+    this.lastLevel.fill(-1);
+  }
+}
+
+export const SCOPE_CHANNELS = ['CH1', 'CH2', 'CH3', 'CH4'];
+
+/** Осциллограф: 4 канала, вход 1 МОм относительно своего GND. */
+class ScopeModel extends Model {
+  waves = SCOPE_CHANNELS.map(() => new Waveform());
+  private lows: LowCache[] = SCOPE_CHANNELS.map(() => ({ key: '', v: 0 }));
+  stamp(m: MNA) { for (const c of SCOPE_CHANNELS) m.r(this.net(c), this.net('GND'), 1e6, false); }
+  update(t: number) {
+    const ref = this.net('GND');
+    SCOPE_CHANNELS.forEach((c, i) => this.sim.recordProbe(this.waves[i], this.net(c), ref, t, this.lows[i]));
+  }
+  channelsForNet(net: number): number[] {
+    const r: number[] = [];
+    SCOPE_CHANNELS.forEach((c, i) => { if (net >= 0 && this.net(c) === net) r.push(i); });
+    return r;
+  }
+  view() { return {}; }
+  reset() {
+    this.waves = SCOPE_CHANNELS.map(() => new Waveform());
+    this.lows = SCOPE_CHANNELS.map(() => ({ key: '', v: 0 }));
+  }
 }
 
 class UartBoxModel extends Model {
@@ -749,6 +785,7 @@ function makeModel(sim: CircuitSim, p: Part): Model {
     case 'oled': return new OledModel(sim, p);
     case 'neopixel': return new NeoModel(sim, p);
     case 'logic': return new LogicModel(sim, p);
+    case 'scope': return new ScopeModel(sim, p);
     case 'uartbox': return new UartBoxModel(sim, p);
     case 'i2cbox': return new I2cBoxModel(sim, p);
     default: return new PassiveModel(sim, p);
@@ -757,7 +794,7 @@ function makeModel(sim: CircuitSim, p: Part): Model {
 
 export type {
   LedModel, RgbModel, ButtonModel, ServoModel, LcdModel, OledModel, NeoModel, LogicModel, PirModel, HcsrModel,
-  RelayModel, LoadModel, BuzzerModel, UartBoxModel, I2cBoxModel, EspModel, DhtModel,
+  RelayModel, LoadModel, BuzzerModel, UartBoxModel, I2cBoxModel, EspModel, DhtModel, ScopeModel,
 };
 
 // ---------------- схема ----------------
@@ -802,6 +839,8 @@ export class CircuitSim implements Board {
   private netEdge = new Uint8Array(0);
   /** виртуальное время последнего пересчёта, мкс */
   private lastSolveT = -Infinity;
+  /** щупы осциллографа без детали на схеме: точка «деталь:вывод» и запись сигнала */
+  private probes: ({ part: string; pin: string; net: number; wave: Waveform; low: LowCache } | null)[] = [];
 
   constructor(public doc: CircuitDoc) {
     this.build();
@@ -900,7 +939,7 @@ export class CircuitSim implements Board {
     const n2 = this.gpioNet.get(2);
     if (n2 !== undefined && n2 >= 0) loaded[n2] = 1;
     this.netLoaded = loaded;
-    this.hasAnalyzer = this.doc.parts.some((p) => p.type === 'logic');
+    this.hasAnalyzer = this.doc.parts.some((p) => p.type === 'logic' || p.type === 'scope');
     this.V = new Float64Array(this.netCount);
     this.floating = new Uint8Array(this.netCount).fill(1);
     this.cacheable = ![...this.models.values()].some((m) => (m.constructor as typeof Model).vstamp);
@@ -910,7 +949,11 @@ export class CircuitSim implements Board {
       const pins = m instanceof HcsrModel ? ['TRIG'] : m instanceof LogicModel ? [0, 1, 2, 3, 4, 5, 6, 7].map((i) => `D${i}`) : [];
       for (const pin of pins) { const n = m.net(pin); if (n >= 0) edge[n] = 1; }
     }
+    // с измерительным прибором на схеме (или щупом) важен каждый фронт везде: склейку пересчётов выключаем
+    if (this.doc.parts.some((p) => p.type === 'logic' || p.type === 'scope') || this.probes?.some(Boolean)) edge.fill(1);
     this.netEdge = edge;
+    // щупы — заново к своим выводам (номера сетей после правки схемы меняются)
+    for (const pr of this.probes ?? []) if (pr) pr.net = this.pinNet.get(`${pr.part}:${pr.pin}`) ?? -1;
     this.markDirty();
   }
 
@@ -1021,17 +1064,105 @@ export class CircuitSim implements Board {
 
   logBits(gpio: number, events: [number, number][]) {
     const n = this.gpioNet.get(gpio);
-    if (n === undefined || n < 0) return;
+    if (n === undefined || n < 0 || !events.length) return;
+    const ts = events.map((e) => e[0]);
+    const vs = events.map((e) => (e[1] ? 3.3 : 0));
     for (const m of this.models.values()) {
-      if (!(m instanceof LogicModel)) continue;
-      for (const ch of m.channelsForNet(n)) for (const [t, v] of events) m.record(ch, t, v);
+      if (m instanceof LogicModel) {
+        for (const ch of m.channelsForNet(n)) {
+          for (const [t, v] of events) m.record(ch, t, v);
+          m.waves[ch].burst(ts, vs);
+        }
+      } else if (m instanceof ScopeModel) {
+        for (const ch of m.channelsForNet(n)) m.waves[ch].burst(ts, vs);
+      }
+    }
+    for (const pr of this.probes) if (pr && pr.net === n) pr.wave.burst(ts, vs);
+  }
+
+  // ---------- приборы ----------
+  /**
+   * Щупы осциллографа: точки схемы «деталь:вывод» (null — канал свободен). Возвращает записи
+   * сигнала; у щупа, который не сдвинулся, запись сохраняется.
+   */
+  setProbes(list: ({ part: string; pin: string } | null)[]): (Waveform | null)[] {
+    const old = this.probes;
+    this.probes = list.map((x, i) => {
+      if (!x) return null;
+      const prev = old[i];
+      if (prev && prev.part === x.part && prev.pin === x.pin) return prev;
+      const net = this.pinNet.get(`${x.part}:${x.pin}`) ?? -1;
+      const pr = { part: x.part, pin: x.pin, net, wave: new Waveform(), low: { key: '', v: 0 } };
+      if (this.M) this.recordProbe(pr.wave, net, -1, this.M.now(), pr.low);
+      return pr;
+    });
+    if (this.probes.some(Boolean)) this.netEdge.fill(1);
+    return this.probes.map((x) => x?.wave ?? null);
+  }
+
+  /** Вывод ESP32 с аппаратным ШИМ, который управляет сетью (напрямую или через резистор). */
+  pwmPinFor(net: number): number | null {
+    const M = this.M;
+    if (!M || net < 0) return null;
+    const own = (n: number) => {
+      for (const g of this.netGpios.get(n) ?? []) {
+        const st = M.gpio[g];
+        if (st.pwm && st.pwm.freq > 0 && (st.mode === 3 || st.mode === 19)) return g;
+      }
+      return null;
+    };
+    const d = own(net);
+    if (d !== null) return d;
+    for (const nb of this.neighbors.get(net) ?? []) { const g = own(nb); if (g !== null) return g; }
+    return null;
+  }
+
+  /** Напряжение сети в «низкой» фазе ШИМ вывода pin: схема решается ещё раз с выводом в нуле. */
+  lowPhaseVoltage(pin: number, net: number): number {
+    const M = this.M;
+    if (!M || net < 0) return 0;
+    const g = M.gpio[pin];
+    const saved = { pwm: g.pwm, out: g.out };
+    const V = this.V; const fl = this.floating; const ds = this.lastDiodes;
+    const st = ds.map((d) => [d.on, d.i] as const);
+    const wasSolving = this.solving;
+    g.pwm = null; g.out = 0;
+    this.solving = true;
+    try {
+      this.solveCached();
+      return this.V[net];
+    } finally {
+      g.pwm = saved.pwm; g.out = saved.out;
+      this.V = V; this.floating = fl; this.lastDiodes = ds;
+      ds.forEach((d, i) => { d.on = st[i][0]; d.i = st[i][1]; });
+      this.solving = wasSolving;
     }
   }
 
-  uartTx(txPin: number, bytes: number[], baud: number) {
+  /** Записать текущее напряжение сети (относительно ref) в канал прибора. */
+  recordProbe(w: Waveform, net: number, ref: number, t: number, low: { key: string; v: number }) {
+    const M = this.M;
+    if (net < 0 || !M) { w.push(t, 0); return; }
+    const vr = ref >= 0 ? this.V[ref] ?? 0 : 0;
+    // TX работающего UART в покое — высокий уровень (сами биты приходят пакетами в logBits)
+    const serials = M.lib.serials as { begun: boolean; txPin: number }[] | undefined;
+    if (serials?.some((s) => s.begun && this.gpioNet.get(s.txPin) === net) && this.gpioDriving(net) === null) {
+      w.push(t, 3.3 - vr);
+      return;
+    }
+    const v = (this.V[net] ?? 0) - vr;
+    const pin = this.pwmPinFor(net);
+    const pwm = pin !== null ? M.gpio[pin].pwm : null;
+    if (pin === null || !pwm || pwm.duty <= 0 || pwm.duty >= 1) { w.push(t, v); return; }
+    const key = `${pin}|${pwm.freq}|${pwm.duty}|${v.toFixed(6)}|${vr.toFixed(6)}`;
+    if (low.key !== key) { low.key = key; low.v = this.lowPhaseVoltage(pin, net) - vr; }
+    w.push(t, v, { T: 1e6 / pwm.freq, duty: pwm.duty, hi: v, lo: low.v });
+  }
+
+  uartTx(txPin: number, bytes: number[], baud: number, t0?: number) {
     const n = this.gpioNet.get(txPin);
     if (n === undefined || n < 0) return;
-    if (this.hasAnalyzer && this.M) this.logBits(txPin, uartWave(bytes, baud, this.M.now()));
+    if (this.hasAnalyzer && this.M) this.logBits(txPin, uartWave(bytes, baud, t0 ?? this.M.now()));
     for (const m of this.models.values()) {
       if (m instanceof UartBoxModel && m.net('RX') === n && m.powered('VCC', 'GND', 2.8)) m.receive(bytes, baud);
     }
@@ -1101,6 +1232,7 @@ export class CircuitSim implements Board {
     this.lastSolveT = t;
     this.anyPwm = M.gpio.some((g) => g.pwm !== null);
     for (const m of this.models.values()) m.update(t);
+    for (const pr of this.probes) if (pr) this.recordProbe(pr.wave, pr.net, -1, t, pr.low);
     // уровни для прерываний
     const onLevel = M.lib.onLevel as ((pin: number, lvl: number) => void) | undefined;
     if (onLevel) {
@@ -1117,6 +1249,7 @@ export class CircuitSim implements Board {
       this.solving = true;
       try { this.solveCached(); } finally { this.solving = false; this.dirty = false; }
       for (const m of this.models.values()) m.update(t);
+      for (const pr of this.probes) if (pr) this.recordProbe(pr.wave, pr.net, -1, t, pr.low);
     }
   }
 
@@ -1276,5 +1409,6 @@ export function uartWave(bytes: number[], baud: number, t0: number): [number, nu
     for (let i = 0; i < 8; i++) { ev.push([t, (b >> i) & 1]); t += bit; }
     ev.push([t, 1]); t += bit;
   }
+  ev.push([t, 1]); // конец последнего стоп-бита — конец пакета
   return ev;
 }

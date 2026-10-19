@@ -595,6 +595,22 @@ const Logic = memo(function Logic() {
   );
 });
 
+const Scope = memo(function Scope() {
+  const colors = ['#facc15', '#22d3ee', '#f472b6', '#4ade80', '#111'];
+  return (
+    <g>
+      {colors.map((c, i) => <line key={i} x1={i * 10} y1={0} x2={i * 10} y2={-6} stroke={c} strokeWidth={1.8} />)}
+      <rect x={-7} y={-45} width={54} height={39} rx={4} fill="#1e293b" stroke="#0f172a" />
+      <rect x={-3} y={-41} width={34} height={22} rx={2} fill="#05080f" stroke="#334155" strokeWidth={0.6} />
+      <path d="M-1 -26 h5 v-9 h5 v9 h5 v-9 h5 v9 h5 v-9 h4" stroke="#facc15" strokeWidth={0.9} fill="none" />
+      <path d="M-1 -30 q4 -6 8 0 t8 0 t8 0 t7 0" stroke="#22d3ee" strokeWidth={0.8} fill="none" />
+      {[0, 1, 2].map((k) => <circle key={k} cx={39} cy={-38 + k * 7} r={2.2} fill="#475569" stroke="#0f172a" strokeWidth={0.5} />)}
+      <text x={14} y={-13} fontSize={4} textAnchor="middle" fill="#cbd5e1" fontWeight={700} fontFamily="Inter">SCOPE 4CH</text>
+      {['1', '2', '3', '4', '⏚'].map((t, i) => <text key={i} x={i * 10} y={-8.5} fontSize={3.4} textAnchor="middle" fill="#a1a1aa" fontFamily="JetBrains Mono">{t}</text>)}
+    </g>
+  );
+});
+
 const UartBox = memo(function UartBox({ view }: PartViewProps) {
   const on = !!view?.on;
   return (
@@ -631,7 +647,7 @@ const Fallback = ({ part }: PartViewProps) => {
 export const RENDERERS: Record<string, ComponentType<PartViewProps>> = {
   esp32: Esp32, breadboard: Breadboard, led: Led, resistor: Resistor, button: Button, switch: Switch, pot: Pot, ldr: Ldr,
   rgb: Rgb, buzzer: Buzzer, relay: Relay, motor: Motor, lamp: Lamp, lock: Lock, servo: Servo, dht22: Dht, hcsr04: Hcsr,
-  pir: Pir, mq2: Mq2, lcd1602: Lcd, oled: Oled, neopixel: Neo, logic: Logic, uartbox: UartBox, i2cbox: I2cBox,
+  pir: Pir, mq2: Mq2, lcd1602: Lcd, oled: Oled, neopixel: Neo, logic: Logic, scope: Scope, uartbox: UartBox, i2cbox: I2cBox,
 };
 
 export function PartView(props: PartViewProps) {

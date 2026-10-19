@@ -64,12 +64,15 @@ export function createLibs(M: Machine, F: Core) {
      * Передача как у настоящего UART: байты уходят со скоростью baud/10 в секунду,
      * в буфер помещается TX_BUFFER байт — когда он полон, print ждёт (активно, как Serial.write).
      */
-    private transmit(n: number) {
+    /** Возвращает момент, когда байты начнут уходить в линию (после уже стоящих в очереди). */
+    private transmit(n: number): number {
       const byteUs = this.byteUs();
       const now = M.now();
-      this.txFreeAt = Math.max(now, this.txFreeAt) + n * byteUs;
+      const start = Math.max(now, this.txFreeAt);
+      this.txFreeAt = start + n * byteUs;
       const wait = this.txFreeAt - TX_BUFFER * byteUs - now;
       if (wait > 0) { M.board?.settle?.(); M.ops += wait / US_PER_OP; }
+      return start;
     }
     private out(text: string): number {
       if (!this.begun) {
@@ -78,10 +81,10 @@ export function createLibs(M: Machine, F: Core) {
       }
       const bytes = utf8Bytes(text);
       M.ops += 2 + text.length / 4;
-      this.transmit(bytes.length);
+      const t0 = this.transmit(bytes.length);
       M.ev.serial?.(this.port, text, this.baud);
-      if (this.port !== 0 && M.board) M.board.uartTx(this.txPin, bytes, this.baud);
-      else if (this.port === 0 && M.board?.hasAnalyzer) M.board.uartTx(1, bytes, this.baud);
+      if (this.port !== 0 && M.board) M.board.uartTx(this.txPin, bytes, this.baud, t0);
+      else if (this.port === 0 && M.board?.hasAnalyzer) M.board.uartTx(this.txPin, bytes, this.baud, t0);
       return bytes.length;
     }
     print(v: unknown, fmt?: unknown) { return this.out(printText(v, fmt)); }
@@ -288,10 +291,11 @@ export function createLibs(M: Machine, F: Core) {
     writeBytes(data: unknown[], n: number) { this.bits((data as number[]).slice(0, n), 8); }
     private bits(bytes: number[], width: number) {
       const period = 1e6 / this.freq;
+      const tStart = M.now();
       M.ops += (bytes.length * width * period) / 0.25 + 4;
       if (!M.board?.hasAnalyzer) return;
       const cpol = this.mode >= 2 ? 1 : 0;
-      let t = M.now();
+      let t = tStart;
       const clk: [number, number][] = [[t, cpol]];
       const dat: [number, number][] = [[t, 0]];
       for (const b of bytes) {
@@ -302,6 +306,7 @@ export function createLibs(M: Machine, F: Core) {
           t += period / 2; clk.push([t, cpol]);
         }
       }
+      dat.push([t, 0]); // конец пакета
       M.board.logBits(this.sck, clk);
       M.board.logBits(this.mosi, dat);
     }

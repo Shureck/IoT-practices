@@ -2,7 +2,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 import {
-  Play, Square, RotateCcw, Pause, Volume2, VolumeX, Terminal, LineChart, Activity, Network, Radio, MessageSquare,
+  Play, Square, RotateCcw, Pause, Volume2, VolumeX, Terminal, LineChart, Activity, AudioWaveform, Network, Radio, MessageSquare,
   Globe, AlertCircle, Cpu, ChevronDown, ChevronUp, Download, Gauge, Usb } from 'lucide-react';
 import { useWB, type BottomTab } from './store';
 import { CircuitEditor } from './CircuitEditor';
@@ -11,6 +11,7 @@ import { Palette, Inspector } from './Sidebar';
 import { TaskPanel } from './TaskPanel';
 import { SerialPanel, PlotterPanel } from './panels/SerialPanel';
 import { AnalyzerPanel } from './panels/AnalyzerPanel';
+import { ScopePanel } from './panels/ScopePanel';
 import { NetworkPanel, MqttPanel, ChatPanel, BrowserPanel, ProblemsPanel } from './panels/NetPanels';
 import { BoardPanel } from './panels/BoardPanel';
 import { partAction, startSim, stopSim } from './simController';
@@ -100,6 +101,7 @@ export function Toolbar({ left, right }: { left?: ReactNode; right?: ReactNode }
 const BOTTOM: { id: BottomTab; label: string; icon: ReactNode }[] = [
   { id: 'serial', label: 'Монитор порта', icon: <Terminal size={13} /> },
   { id: 'plotter', label: 'Плоттер', icon: <LineChart size={13} /> },
+  { id: 'scope', label: 'Осциллограф', icon: <AudioWaveform size={13} /> },
   { id: 'analyzer', label: 'Анализатор', icon: <Activity size={13} /> },
   { id: 'network', label: 'Сеть', icon: <Network size={13} /> },
   { id: 'mqtt', label: 'MQTT', icon: <Radio size={13} /> },
@@ -139,6 +141,7 @@ function BottomPanel() {
         <div className="min-h-0 flex-1">
           {tab === 'serial' && <SerialPanel />}
           {tab === 'plotter' && <PlotterPanel />}
+          {tab === 'scope' && <ScopePanel />}
           {tab === 'analyzer' && <AnalyzerPanel />}
           {tab === 'network' && <NetworkPanel />}
           {tab === 'mqtt' && <MqttPanel />}

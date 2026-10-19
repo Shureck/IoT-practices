@@ -306,7 +306,19 @@ export const COMPONENTS: CompDef[] = [
     box: [-5, -40, 95, 42],
     pins: [...Array.from({ length: 8 }, (_, i) => ({ name: `D${i}`, x: i * 10, y: 0, kind: 'in' as const })), { name: 'GND', x: 80, y: 0, kind: 'gnd' }],
     props: [],
-    keywords: ['logic', 'analyzer', 'анализатор', 'осциллограф'],
+    keywords: ['logic', 'analyzer', 'анализатор'],
+  },
+  {
+    type: 'scope', title: 'Осциллограф', category: 'Связь и отладка',
+    description: 'Четырёхканальный осциллограф: показывает напряжение во времени — ШИМ, аналоговые сигналы, UART. Вход 1 МОм. Экран, синхронизация, измерения и курсоры — во вкладке «Осциллограф».',
+    box: [-8, -46, 56, 48],
+    pins: [
+      { name: 'CH1', x: 0, y: 0, kind: 'in' }, { name: 'CH2', x: 10, y: 0, kind: 'in' },
+      { name: 'CH3', x: 20, y: 0, kind: 'in' }, { name: 'CH4', x: 30, y: 0, kind: 'in' },
+      { name: 'GND', x: 40, y: 0, kind: 'gnd' },
+    ],
+    props: [],
+    keywords: ['scope', 'oscilloscope', 'осциллограф', 'шим', 'pwm', 'напряжение'],
   },
   {
     type: 'uartbox', title: 'Чёрный ящик (UART)', category: 'Связь и отладка',

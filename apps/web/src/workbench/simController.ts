@@ -1,5 +1,5 @@
 // Запуск симуляции в реальном времени и связь со стором верстака.
-import { Simulation, compileSketch, type CircuitDoc } from '@esp32lab/sim';
+import { Simulation, compileSketch, type CircuitDoc, type Waveform } from '@esp32lab/sim';
 import { useWB } from './store';
 import { LiveNet } from './liveNet';
 import { useApp } from '../store/app';
@@ -61,6 +61,7 @@ export function startSim(): boolean {
     },
   });
   sim.boot();
+  applyProbes();
   wb.set({ running: true, paused: false, simTime: 0, panic: null, warnings: [], netLog: [], status: 'running' });
   audio.resume();
   lastReal = performance.now();
@@ -155,3 +156,14 @@ export function webRequest(method: string, path: string, query: Record<string, s
 }
 
 export function modelOf(id: string): unknown { return sim?.board.models.get(id); }
+
+/** Записи сигнала щупов (по каналам осциллографа); после остановки остаётся последняя. */
+let probeWaves: (Waveform | null)[] = [null, null, null, null];
+export function currentProbeWaves(): (Waveform | null)[] { return probeWaves; }
+
+/** Передать щупы из стора в идущую симуляцию. */
+export function applyProbes() {
+  if (!sim) return;
+  probeWaves = sim.board.setProbes(useWB.getState().probes);
+}
+useWB.subscribe((s, prev) => { if (s.probes !== prev.probes) applyProbes(); });
