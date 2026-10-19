@@ -32,7 +32,8 @@ class AudioEngine {
           this.voices.set(p.id, v);
         }
         if (v.freq !== f) { v.osc.frequency.setTargetAtTime(Math.min(8000, f), this.ctx.currentTime, 0.005); v.freq = f; }
-        v.gain.gain.setTargetAtTime(0.035, this.ctx.currentTime, 0.01);
+        // меандр громкий сам по себе: 0,1 — отчётливо, но не режет слух
+        v.gain.gain.setTargetAtTime(0.1, this.ctx.currentTime, 0.01);
       }
     }
     for (const [id, v] of this.voices) {

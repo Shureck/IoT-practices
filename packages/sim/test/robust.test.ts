@@ -215,3 +215,27 @@ void loop() { for (long i = 0; i < 1000; i++) x += i; }`, bare, [forever]);
     expect(r.results.map((x) => x.ok)).toEqual([false, false, true]);
   });
 });
+
+describe('пищалки', () => {
+  it('активная звучит от вывода ESP32 (digitalWrite) и молчит без питания; пассивная — от tone()', async () => {
+    const c: CircuitDoc = {
+      parts: [esp,
+        { id: 'ba', type: 'buzzer', x: 300, y: 300, rot: 0, props: { kind: 'active' } },
+        { id: 'bp', type: 'buzzer', x: 400, y: 300, rot: 0, props: { kind: 'passive' } }],
+      wires: [
+        { id: 'w1', a: { part: 'ba', pin: 'PLUS' }, b: { part: 'esp', pin: 'D25' }, pts: [], color: 'orange' },
+        { id: 'w2', a: { part: 'ba', pin: 'MINUS' }, b: { part: 'esp', pin: 'GND.1' }, pts: [], color: 'black' },
+        { id: 'w3', a: { part: 'bp', pin: 'PLUS' }, b: { part: 'esp', pin: 'D23' }, pts: [], color: 'orange' },
+        { id: 'w4', a: { part: 'bp', pin: 'MINUS' }, b: { part: 'esp', pin: 'GND.2' }, pts: [], color: 'black' },
+      ],
+    };
+    const h = ctx(String.raw`
+void setup() { pinMode(25, OUTPUT); tone(23, 1000); }
+void loop() { digitalWrite(25, HIGH); delay(100); digitalWrite(25, LOW); delay(100); }`, c);
+    await h.wait(50);
+    expect(h.buzzerFreq('ba')).toBe(2300);
+    expect(h.buzzerFreq('bp')).toBe(1000);
+    await h.wait(100);
+    expect(h.buzzerFreq('ba')).toBe(0);
+  });
+});

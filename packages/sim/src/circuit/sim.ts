@@ -285,7 +285,9 @@ class BuzzerModel extends Model {
     const v = this.V('PLUS') - this.V('MINUS');
     const pwm = this.sim.pwmOf(this.net('PLUS'));
     let f = 0;
-    if (this.prop('kind') === 'active') f = v > 2.4 ? 2300 : pwm && pwm.duty > 0 && pwm.freq < 200 ? 2300 : 0;
+    // активная пищалка звучит своим тоном (~2,3 кГц), как только на неё подали питание: от вывода
+    // ESP32 через его ~30 Ом на ней около 1,9 В — этого ей хватает. ШИМ/tone() тоже «включает» её.
+    if (this.prop('kind') === 'active') f = (pwm && pwm.duty > 0) || v > 1.5 ? 2300 : 0;
     else if (pwm && pwm.freq >= 20 && pwm.freq <= 20000 && pwm.duty > 0.02 && pwm.duty < 0.98) f = pwm.freq;
     if (f !== this.freq) { this.freq = f; this.rev++; }
     if (this.prop('kind') !== 'active' && v > 2.4 && !pwm) {
