@@ -7,8 +7,8 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      '/api': 'http://localhost:8080',
-      '/mqtt': { target: 'ws://localhost:8080', ws: true },
+      '/api': process.env.API_URL ?? 'http://localhost:8080',
+      '/mqtt': { target: (process.env.API_URL ?? 'http://localhost:8080').replace(/^http/, 'ws'), ws: true },
     },
   },
   build: {

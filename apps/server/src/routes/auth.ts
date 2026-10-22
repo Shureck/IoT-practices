@@ -62,7 +62,7 @@ export function authRoutes(app: FastifyInstance, ctx: AppCtx) {
       throw e;
     }
     issueCookie(reply, cfg, user);
-    return { user: userView(db, user) };
+    return { user: userView(db, user, cfg) };
   });
 
   app.post('/api/auth/login', { config: perIp(20) }, async (req, reply) => {
@@ -70,7 +70,7 @@ export function authRoutes(app: FastifyInstance, ctx: AppCtx) {
     const user = db.prepare('SELECT * FROM users WHERE email = ?').get(b.email) as UserRow | undefined;
     if (!user || !(await checkPassword(b.password, user.pass_hash))) throw unauthorized('Неверный email или пароль');
     issueCookie(reply, cfg, user);
-    return { user: userView(db, user) };
+    return { user: userView(db, user, cfg) };
   });
 
   app.post('/api/auth/logout', async (_req, reply) => {
@@ -80,7 +80,7 @@ export function authRoutes(app: FastifyInstance, ctx: AppCtx) {
 
   app.get('/api/me', async (req) => {
     const u = requireUser(req);
-    return { user: userView(db, u) };
+    return { user: userView(db, u, cfg) };
   });
 
   app.patch('/api/me', { config: perIp(30) }, async (req, reply) => {
@@ -104,6 +104,6 @@ export function authRoutes(app: FastifyInstance, ctx: AppCtx) {
     }
     const fresh = db.prepare('SELECT * FROM users WHERE id = ?').get(u.id) as UserRow;
     if (b.password !== undefined) issueCookie(reply, cfg, fresh);
-    return { user: userView(db, fresh) };
+    return { user: userView(db, fresh, cfg) };
   });
 }

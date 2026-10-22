@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { Worker } from 'node:worker_threads';
 import type { CircuitDoc } from '@esp32lab/sim';
 import type { CheckOutcome, WorkerReply } from './check-worker';
+import type { WorkerExtra } from './practices';
 
 export class CheckTimeout extends Error {}
 export class PoolBusy extends Error {}
@@ -14,6 +15,7 @@ interface Job {
   practiceId: string;
   code: string;
   circuit: CircuitDoc;
+  extra?: WorkerExtra;
   resolve: (o: CheckOutcome) => void;
   reject: (e: Error) => void;
 }
@@ -101,15 +103,15 @@ export class CheckPool {
       }, this.timeoutMs);
       // поток сам делит время между проверками и укладывается раньше, чем сработает таймер выше
       const budgetMs = Math.max(this.timeoutMs * 0.5, this.timeoutMs - 5000);
-      slot.worker.postMessage({ id: job.id, practiceId: job.practiceId, code: job.code, circuit: job.circuit, budgetMs });
+      slot.worker.postMessage({ id: job.id, practiceId: job.practiceId, code: job.code, circuit: job.circuit, budgetMs, ...(job.extra ?? {}) });
     }
   }
 
-  run(practiceId: string, code: string, circuit: CircuitDoc): Promise<CheckOutcome> {
+  run(practiceId: string, code: string, circuit: CircuitDoc, extra?: WorkerExtra): Promise<CheckOutcome> {
     if (this.closed) return Promise.reject(new Error('pool closed'));
     if (this.queue.length >= this.maxQueue) return Promise.reject(new PoolBusy('busy'));
     return new Promise((resolve, reject) => {
-      this.queue.push({ id: this.seq++, practiceId, code, circuit, resolve, reject });
+      this.queue.push({ id: this.seq++, practiceId, code, circuit, extra, resolve, reject });
       this.pump();
     });
   }

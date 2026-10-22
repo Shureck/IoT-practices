@@ -4,10 +4,13 @@ import type { CheckPool } from './pool';
 import type { SqliteChat } from './chat';
 import type { NetRequest, NetResponse } from './net';
 import type { Llm } from './ai';
+import type { PracticeStore } from './practices';
 
 export interface AppCtx {
   cfg: Config;
   db: DB;
+  /** все практики: встроенные и из файлов администраторов */
+  practices: PracticeStore;
   pool: CheckPool;
   chat: SqliteChat;
   /** реальный HTTP-запрос (подменяется в тестах) */

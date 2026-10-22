@@ -12,14 +12,15 @@ export const COURSE_ORDER: string[] = [...PRACTICES]
 /** Что открыто новой группе: первые четыре практики курса. */
 export const DEFAULT_OPEN = COURSE_ORDER.slice(0, 4);
 
-export function openForGroup(db: DB, groupId: number): string[] {
+/** order — порядок курса с учётом задач, добавленных администраторами (по умолчанию — только встроенные). */
+export function openForGroup(db: DB, groupId: number, order: string[] = COURSE_ORDER): string[] {
   const rows = db.prepare('SELECT practice_id FROM group_practices WHERE group_id = ?').all(groupId) as { practice_id: string }[];
   const set = new Set(rows.map((r) => r.practice_id));
-  return COURSE_ORDER.filter((id) => set.has(id));
+  return order.filter((id) => set.has(id));
 }
 
-export function setOpenForGroup(db: DB, groupId: number, ids: string[]) {
-  const valid = ids.filter((id) => COURSE_ORDER.includes(id));
+export function setOpenForGroup(db: DB, groupId: number, ids: string[], order: string[] = COURSE_ORDER) {
+  const valid = ids.filter((id) => order.includes(id));
   db.transaction(() => {
     db.prepare('DELETE FROM group_practices WHERE group_id = ?').run(groupId);
     const ins = db.prepare('INSERT INTO group_practices (group_id, practice_id) VALUES (?, ?)');
@@ -28,12 +29,12 @@ export function setOpenForGroup(db: DB, groupId: number, ids: string[]) {
 }
 
 /** Открытые практики пользователя; null — открыто всё. */
-export function openForUser(db: DB, user: { role: string; group_id: number | null }): string[] | null {
+export function openForUser(db: DB, user: { role: string; group_id: number | null }, order: string[] = COURSE_ORDER): string[] | null {
   if (user.role === 'teacher' || !user.group_id) return null;
-  return openForGroup(db, user.group_id);
+  return openForGroup(db, user.group_id, order);
 }
 
-export function assertOpen(db: DB, user: { role: string; group_id: number | null }, practiceId: string) {
-  const open = openForUser(db, user);
+export function assertOpen(db: DB, user: { role: string; group_id: number | null }, practiceId: string, order: string[] = COURSE_ORDER) {
+  const open = openForUser(db, user, order);
   if (open && !open.includes(practiceId)) throw forbidden('Эта практика пока закрыта — её откроет преподаватель');
 }

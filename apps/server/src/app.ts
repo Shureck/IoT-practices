@@ -11,6 +11,7 @@ import type { AppCtx } from './ctx';
 import { yandexLlm, type Llm } from './ai';
 import { openDb } from './db';
 import { CheckPool } from './pool';
+import { PracticeStore } from './practices';
 import { SqliteChat } from './chat';
 import { safeFetch } from './net';
 import { loadUser } from './auth';
@@ -24,6 +25,7 @@ import { projectRoutes } from './routes/projects';
 import { teacherRoutes } from './routes/teacher';
 import { netRoutes } from './routes/net';
 import { compileRoutes } from './routes/compile';
+import { adminRoutes } from './routes/admin';
 
 declare module 'fastify' {
   interface FastifyInstance {
@@ -59,6 +61,7 @@ export async function buildApp(cfg: Config, opts: BuildOptions = {}): Promise<Fa
   const ctx: AppCtx = {
     cfg,
     db,
+    practices: new PracticeStore(db, (m) => app.log.warn(m)),
     pool,
     chat: new SqliteChat(db),
     fetchExternal: opts.fetchExternal ?? ((r) => safeFetch(r)),
@@ -124,6 +127,7 @@ export async function buildApp(cfg: Config, opts: BuildOptions = {}): Promise<Fa
   progressRoutes(app, ctx);
   projectRoutes(app, ctx);
   teacherRoutes(app, ctx);
+  adminRoutes(app, ctx);
   netRoutes(app, ctx);
   compileRoutes(app, ctx);
 

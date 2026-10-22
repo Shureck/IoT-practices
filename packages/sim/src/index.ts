@@ -1,6 +1,8 @@
 export { compileSketch } from './lang/compiler';
 export type { CompileOutput, Diag } from './lang/compiler';
-export { FUNCS, CLASSES, CONSTS, GLOBAL_OBJECTS, JSON_METHODS } from './lang/api';
+export { FUNCS, CLASSES, CONSTS, GLOBAL_OBJECTS, JSON_METHODS, KNOWN_HEADERS } from './lang/api';
+export { API_GROUPS, API_DOCS } from './lang/apiDocs';
+export type { ApiDoc, ApiGroup } from './lang/apiDocs';
 export * from './runtime/index';
 export * from './circuit/defs';
 export { createRouter, polyPath, simplify } from './circuit/route';

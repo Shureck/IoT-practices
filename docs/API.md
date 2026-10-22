@@ -96,6 +96,27 @@
 
 Учитель видит только свои группы.
 
+## Редактор задач (администраторы)
+
+Администратор — преподаватель из `ADMIN_EMAILS` (если переменная пуста — любой преподаватель); признак `isAdmin` приходит в `/api/me`.
+Формат файла задачи и все возможности — [TASK_FORMAT.md](TASK_FORMAT.md). Загруженные задачи хранятся в таблице `tasks`
+(исходный текст файла), история правок — в `task_revisions` (последние 30 версий).
+
+| Метод | Путь | Тело | Ответ |
+|---|---|---|---|
+| GET | `/api/admin/tasks` | — | `{ tasks: [{ id, title, module, order, kind, source: builtin\|custom\|edited, visible, checks: code\|file\|quiz, submissions, updatedAt, updatedBy }], loadErrors }` |
+| GET | `/api/admin/tasks/:id/file` | — | `{ id, source, visible, text, stored, updatedAt }` — файл задачи (для встроенной — выгрузка с `checks: builtin`) |
+| GET | `/api/admin/task-files/:name` | — | `example-task.yaml`, `example-quiz.yaml`, `reference.md` (скачивание) |
+| POST | `/api/admin/tasks/validate` | `{ text, mode: create\|edit, id? }` | `{ ok, canPublish, issues: [{ path, message, level, line? }], dryRun: { solution, starter }, preview }` — разбор файла и прогон эталона и заготовки через проверки |
+| POST | `/api/admin/tasks` | `{ text, note? }` | `{ ok, id, warnings }` — публикация новой задачи (422, если есть ошибки) |
+| PUT | `/api/admin/tasks/:id` | `{ text, note? }` | `{ ok, id, warnings }` — правка своей или встроенной (у встроенной сохраняется «правка» поверх кода) |
+| POST | `/api/admin/tasks/:id/visibility` | `{ visible }` | скрыть/показать свою задачу (история сдач остаётся) |
+| DELETE | `/api/admin/tasks/:id` | — | удалить свою задачу (409, если есть сдачи) или вернуть встроенную версию |
+| GET | `/api/admin/tasks/:id/revisions[/:rid]` | — | список версий / текст версии |
+
+Публикация возможна, только если формат верен, эталонный код компилируется, эталон проходит **все** проверки, а заготовка — не все.
+Проверки из файла — это шаги и условия (не код): сервер не выполняет загруженный код, только готовые операции симулятора.
+
 ## Сеть для симулятора
 
 | Метод | Путь | Описание |
@@ -113,7 +134,7 @@
 
 ## Переменные окружения сервера
 
-`PORT=8080`, `DATA_DIR=./data` (SQLite `esp32lab.db`), `JWT_SECRET`, `TEACHER_INVITE=teacher2025`,
+`PORT=8080`, `DATA_DIR=./data` (SQLite `esp32lab.db`), `JWT_SECRET`, `TEACHER_INVITE=teacher2025`, `ADMIN_EMAILS` (редактор задач),
 `COMPILER_URL=http://compiler:8090`, `MQTT_WS_URL=ws://mosquitto:9001`, `MQTT_PUBLIC_HOST`, `MQTT_PUBLIC_PORT=1883`,
 `WEB_DIST=../web/dist`, `SEED_DEMO=1` (создать demo-аккаунты `teacher@demo.local / teacher123`,
 `student@demo.local / student123`, группу «Демо-группа» с кодом `DEMO25`).

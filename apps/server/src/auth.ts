@@ -25,6 +25,8 @@ export interface UserView {
   name: string;
   email: string;
   role: 'student' | 'teacher';
+  /** может пользоваться редактором задач */
+  isAdmin: boolean;
   groupId: number | null;
   groupName: string | null;
   xp: number;
@@ -45,13 +47,20 @@ export function userXp(db: DB, userId: number): number {
   return r.xp;
 }
 
-export function userView(db: DB, u: UserRow): UserView {
+/** Администратор: преподаватель из ADMIN_EMAILS (если список не задан — любой преподаватель). */
+export function isAdmin(cfg: Config, u: { role: string; email: string }): boolean {
+  if (u.role !== 'teacher') return false;
+  return !cfg.adminEmails.length || cfg.adminEmails.includes(u.email.toLowerCase());
+}
+
+export function userView(db: DB, u: UserRow, cfg?: Config): UserView {
   const g = u.group_id ? (db.prepare('SELECT name FROM groups WHERE id = ?').get(u.group_id) as { name: string } | undefined) : undefined;
   return {
     id: u.id,
     name: u.name,
     email: u.email,
     role: u.role,
+    isAdmin: cfg ? isAdmin(cfg, u) : false,
     groupId: g ? u.group_id : null,
     groupName: g?.name ?? null,
     xp: userXp(db, u.id),
@@ -103,6 +112,12 @@ export function loadUser(req: FastifyRequest, db: DB, cfg: Config): UserRow | nu
 export function requireUser(req: FastifyRequest): UserRow {
   if (!req.user) throw unauthorized();
   return req.user;
+}
+
+export function requireAdmin(req: FastifyRequest, cfg: Config): UserRow {
+  const u = requireUser(req);
+  if (!isAdmin(cfg, u)) throw forbidden('Редактор задач доступен только администраторам');
+  return u;
 }
 
 export function requireTeacher(req: FastifyRequest): UserRow {

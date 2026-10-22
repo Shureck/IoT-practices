@@ -53,6 +53,10 @@ export interface Practice {
   circuitLocked?: boolean;
   /** настройки сети для проверок (свои HTTP-маршруты и т.п.) */
   net?: MockNetOptions;
+  /** задачи из файла: описание автопроверок (шаги и условия) — по нему проверки собирает и поток проверки */
+  checksSpec?: Record<string, unknown>[];
+  /** задачи из файла: описание HTTP-маршрутов для проверок */
+  httpRoutes?: Record<string, unknown>[];
   /** вопросы для kind === 'quiz' */
   quiz?: QuizQuestion[];
   /** минимальная доля верных ответов в квизе */

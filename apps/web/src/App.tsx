@@ -11,6 +11,7 @@ const Course = lazy(() => import('./pages/Course'));
 const PracticePage = lazy(() => import('./pages/PracticePage'));
 const Sandbox = lazy(() => import('./pages/Sandbox'));
 const Teacher = lazy(() => import('./pages/Teacher'));
+const AdminTasks = lazy(() => import('./pages/AdminTasks'));
 const Review = lazy(() => import('./pages/Review'));
 const DraftReview = lazy(() => import('./pages/Review').then((m) => ({ default: m.DraftReview })));
 const Reference = lazy(() => import('./pages/Reference'));
@@ -36,6 +37,7 @@ function Header() {
         <NavLink to="/sandbox" className={link}>Песочница</NavLink>
         <NavLink to="/reference" className={link}>Справочник</NavLink>
         {user?.role === 'teacher' && <NavLink to="/teacher" className={link}>Преподавателю</NavLink>}
+        {user?.isAdmin && <NavLink to="/admin/tasks" className={link}>Задачи</NavLink>}
       </nav>
       <div className="ml-auto flex items-center gap-1">
         {user && progress && user.role === 'student' && (
@@ -87,13 +89,14 @@ function Loading() {
   return <div className="flex h-full items-center justify-center"><Spinner size={26} /></div>;
 }
 
-function RequireAuth({ children, teacher }: { children: ReactNode; teacher?: boolean }) {
+function RequireAuth({ children, teacher, admin }: { children: ReactNode; teacher?: boolean; admin?: boolean }) {
   const user = useApp((s) => s.user);
   const loaded = useApp((s) => s.userLoaded);
   const loc = useLocation();
   if (!loaded) return <Loading />;
   if (!user) return <Navigate to={`/login?next=${encodeURIComponent(loc.pathname)}`} replace />;
   if (teacher && user.role !== 'teacher') return <Navigate to="/course" replace />;
+  if (admin && !user.isAdmin) return <Navigate to="/course" replace />;
   return <>{children}</>;
 }
 
@@ -117,6 +120,7 @@ function Shell() {
             <Route path="/reference" element={<Reference />} />
             <Route path="/profile" element={<RequireAuth><Profile /></RequireAuth>} />
             <Route path="/teacher" element={<RequireAuth teacher><Teacher /></RequireAuth>} />
+            <Route path="/admin/tasks" element={<RequireAuth admin><AdminTasks /></RequireAuth>} />
             <Route path="/review/:id" element={<RequireAuth teacher><Review /></RequireAuth>} />
             <Route path="/review/draft/:studentId/:practiceId" element={<RequireAuth teacher><DraftReview /></RequireAuth>} />
             <Route path="*" element={<NotFound />} />

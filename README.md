@@ -16,6 +16,7 @@
 | [docs/DEPLOY.md](docs/DEPLOY.md) | администратору: Docker, HTTPS, переменные окружения, резервные копии, обновление |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | разработчикам: как устроены симулятор, схема, разводка проводов, сервер и компилятор |
 | [docs/CONTENT_GUIDE.md](docs/CONTENT_GUIDE.md) | авторам практик: формат практики и автопроверок |
+| [docs/TASK_FORMAT.md](docs/TASK_FORMAT.md) | администраторам: формат файла задачи, все детали, шаги и условия проверок (образцы — `docs/examples/`) |
 | [docs/API.md](docs/API.md) | контракт HTTP API |
 
 ## Возможности

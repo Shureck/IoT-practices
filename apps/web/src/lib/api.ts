@@ -7,10 +7,36 @@ export interface User {
   name: string;
   email: string;
   role: 'student' | 'teacher';
+  /** доступен редактор задач */
+  isAdmin?: boolean;
   groupId: number | null;
   groupName: string | null;
   xp: number;
   createdAt: string;
+}
+
+export interface AdminTask {
+  id: string;
+  title: string;
+  module: number;
+  order: number;
+  kind: Practice['kind'];
+  source: 'builtin' | 'custom' | 'edited';
+  visible: boolean;
+  checks: 'code' | 'file' | 'quiz';
+  submissions: number;
+  updatedAt: string | null;
+  updatedBy: string | null;
+}
+
+export interface TaskIssue { path: string; message: string; level: 'error' | 'warning'; line?: number }
+export interface TaskResult { id: string; title: string; ok: boolean; message?: string }
+export interface TaskAnalysis {
+  ok: boolean;
+  canPublish: boolean;
+  issues: TaskIssue[];
+  dryRun: { solution: TaskResult[]; starter: TaskResult[] } | null;
+  preview: { id: string; title: string; module: number; order: number; kind: Practice['kind']; xp: number; goals: number; hints: number; checks: { id: string; title: string }[]; checksSource: 'code' | 'file'; questions: number } | null;
 }
 
 export type PublicPractice = Omit<Practice, 'solution' | 'checks' | 'quiz'> & {
@@ -169,6 +195,22 @@ export const api = {
   },
   teacherSubmission: (id: number) => req<{ submission: Submission }>('GET', `/api/teacher/submissions/${id}`),
   review: (id: number, grade: number | null, comment: string) => req<{ ok: true }>('POST', `/api/teacher/submissions/${id}/review`, { grade, comment }),
+  // ---- редактор задач (администраторы) ----
+  adminTasks: () => req<{ tasks: AdminTask[]; loadErrors: { id: string; message: string }[] }>('GET', '/api/admin/tasks'),
+  adminTaskFile: (id: string) => req<{ id: string; source: AdminTask['source']; visible: boolean; text: string; stored: boolean; updatedAt: string | null }>('GET', `/api/admin/tasks/${encodeURIComponent(id)}/file`),
+  adminValidate: (b: { text: string; mode: 'create' | 'edit'; id?: string }) => req<TaskAnalysis>('POST', '/api/admin/tasks/validate', b),
+  adminCreate: (text: string, note?: string) => req<{ ok: true; id: string; warnings: number }>('POST', '/api/admin/tasks', { text, note }),
+  adminUpdate: (id: string, text: string, note?: string) => req<{ ok: true; id: string; warnings: number }>('PUT', `/api/admin/tasks/${encodeURIComponent(id)}`, { text, note, mode: 'edit', id }),
+  adminVisibility: (id: string, visible: boolean) => req<{ ok: true; visible: boolean }>('POST', `/api/admin/tasks/${encodeURIComponent(id)}/visibility`, { visible }),
+  adminDelete: (id: string) => req<{ ok: true }>('DELETE', `/api/admin/tasks/${encodeURIComponent(id)}`),
+  adminRevisions: (id: string) => req<{ revisions: { id: number; note: string | null; createdAt: string; author: string | null }[] }>('GET', `/api/admin/tasks/${encodeURIComponent(id)}/revisions`),
+  adminRevision: (id: string, rid: number) => req<{ id: number; text: string; createdAt: string }>('GET', `/api/admin/tasks/${encodeURIComponent(id)}/revisions/${rid}`),
+  /** текст файла-основы: example-task.yaml, example-quiz.yaml, reference.md */
+  adminFileText: async (name: string): Promise<string> => {
+    const res = await fetch(`/api/admin/task-files/${name}`, { credentials: 'same-origin' });
+    if (!res.ok) throw new ApiError(res.status, `Не удалось загрузить файл (${res.status})`);
+    return res.text();
+  },
   studentDraft: (studentId: number, practiceId: string) =>
     req<{ studentId: number; studentName: string; practiceId: string; code: string; circuit: CircuitDoc; updatedAt: string }>('GET', `/api/teacher/students/${studentId}/drafts/${encodeURIComponent(practiceId)}`),
   /** автопроверка черновика (и разбор ИИ) — для несданной работы, студент результат не видит */

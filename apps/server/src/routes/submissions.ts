@@ -7,8 +7,9 @@ import { assertOpen } from '../access';
 import { perUser } from '../ctx';
 import { requireUser } from '../auth';
 import { HttpError, badRequest, forbidden, notFound, parse } from '../errors';
-import { awardAfterSubmission, getPractice, gradeQuiz, xpFor, type ResultItem } from '../grading';
+import { awardAfterSubmission, gradeQuiz, xpFor, type ResultItem } from '../grading';
 import { CheckTimeout, PoolBusy } from '../pool';
+import { workerExtra } from '../practices';
 import { cleanAnswer, explainPrompt } from '../ai';
 import { CircuitSchema, CodeSchema, IdParam, SUMMARY_COLS, submissionFull, submissionView, type SubmissionRow } from './common';
 
@@ -32,7 +33,7 @@ export interface CheckOutput {
 /** Прогнать автопроверки практики в пуле потоков. */
 export async function runChecks(ctx: AppCtx, practice: Practice, code: string, circuit: CircuitDoc): Promise<CheckOutput> {
   try {
-    return await ctx.pool.run(practice.id, code, circuit);
+    return await ctx.pool.run(practice.id, code, circuit, ctx.practices.isModified(practice.id) ? workerExtra(practice) : undefined);
   } catch (e) {
     if (e instanceof CheckTimeout) {
       const secs = Math.round(ctx.cfg.checkTimeoutMs / 1000);
@@ -49,20 +50,27 @@ export async function runChecks(ctx: AppCtx, practice: Practice, code: string, c
   }
 }
 
-function practiceOr404(id: string): Practice {
-  const p = getPractice(id);
-  if (!p) throw notFound('Практика не найдена');
-  return p;
-}
 
 export function submissionRoutes(app: FastifyInstance, ctx: AppCtx) {
   const { db } = ctx;
 
+  const practiceOr404 = (id: string): Practice => {
+    const p = ctx.practices.get(id);
+    if (!p) throw notFound('Практика не найдена');
+    return p;
+  };
+  /** Для проверки и сдачи: скрытая администратором задача недоступна. */
+  const activePractice = (id: string): Practice => {
+    const p = practiceOr404(id);
+    if (!ctx.practices.isVisible(id)) throw notFound('Эта задача сейчас скрыта');
+    return p;
+  };
+
   app.post('/api/check', { config: perUser(20) }, async (req) => {
     const u = requireUser(req);
     const b = parse(CheckBody, req.body);
-    const practice = practiceOr404(b.practiceId);
-    assertOpen(db, u, practice.id);
+    const practice = activePractice(b.practiceId);
+    assertOpen(db, u, practice.id, ctx.practices.order());
     if (practice.kind === 'quiz') throw badRequest('Квиз проверяется только при сдаче');
     const circuit = (b.circuit ?? practice.starterCircuit) as CircuitDoc;
     return runChecks(ctx, practice, b.code, circuit);
@@ -71,8 +79,8 @@ export function submissionRoutes(app: FastifyInstance, ctx: AppCtx) {
   app.post('/api/submissions', { config: perUser(20) }, async (req) => {
     const u = requireUser(req);
     const b = parse(SubmitBody, req.body);
-    const practice = practiceOr404(b.practiceId);
-    assertOpen(db, u, practice.id);
+    const practice = activePractice(b.practiceId);
+    assertOpen(db, u, practice.id, ctx.practices.order());
     const circuit = (b.circuit ?? practice.starterCircuit) as CircuitDoc;
 
     let passed: boolean;
@@ -98,7 +106,7 @@ export function submissionRoutes(app: FastifyInstance, ctx: AppCtx) {
         u.id, practice.id, passed ? 'passed' : 'failed', score, JSON.stringify(results), b.hintsUsed, xp,
         b.code, JSON.stringify(circuit), b.quizAnswers ? JSON.stringify(b.quizAnswers) : null, b.studentComment?.trim() || null, at.toISOString(),
       );
-      const newAchievements = awardAfterSubmission(db, u.id, practice, passed, b.hintsUsed, at);
+      const newAchievements = awardAfterSubmission(db, u.id, practice, passed, b.hintsUsed, at, ctx.practices.list());
       const row = db.prepare('SELECT * FROM submissions WHERE id = ?').get(r.lastInsertRowid) as SubmissionRow;
       return { submission: submissionView(row), xpGained: xp, newAchievements };
     });

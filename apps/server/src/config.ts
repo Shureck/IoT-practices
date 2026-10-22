@@ -10,6 +10,8 @@ export interface Config {
   dataDir: string;
   jwtSecret: string;
   teacherInvite: string;
+  /** email-ы администраторов (редактор задач); пусто — администратором считается любой преподаватель */
+  adminEmails: string[];
   compilerUrl: string;
   mqttWsUrl: string;
   mqttPublicHost: string | null;
@@ -59,6 +61,7 @@ export function loadConfig(rawEnv: NodeJS.ProcessEnv = process.env, overrides: P
     dataDir,
     jwtSecret: overrides.jwtSecret ?? loadSecret(dataDir, env.JWT_SECRET),
     teacherInvite: env.TEACHER_INVITE ?? 'teacher2025',
+    adminEmails: (env.ADMIN_EMAILS ?? '').split(/[,;\s]+/).map((s) => s.trim().toLowerCase()).filter(Boolean),
     compilerUrl: (env.COMPILER_URL ?? 'http://localhost:8090').replace(/\/+$/, ''),
     mqttWsUrl: env.MQTT_WS_URL ?? 'ws://mosquitto:9001',
     mqttPublicHost: env.MQTT_PUBLIC_HOST || null,

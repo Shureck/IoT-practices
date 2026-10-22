@@ -8,7 +8,6 @@ import { requireTeacher, userXp } from '../auth';
 import { HttpError, badRequest, notFound, parse } from '../errors';
 import { cleanAnswer, explainPrompt } from '../ai';
 import { runChecks } from './submissions';
-import { getPractice } from '../grading';
 import { IdParam, SUMMARY_COLS, submissionFull, submissionView, type SubmissionRow } from './common';
 import { assignmentView, progressOf } from './progress';
 import { nowIso, type DB } from '../db';
@@ -77,7 +76,7 @@ export function teacherRoutes(app: FastifyInstance, ctx: AppCtx) {
     const count = (db.prepare('SELECT COUNT(*) AS n FROM groups WHERE teacher_id = ?').get(t.id) as { n: number }).n;
     if (count >= 100) throw badRequest('Слишком много групп');
     const r = db.prepare('INSERT INTO groups (name, join_code, teacher_id, created_at) VALUES (?, ?, ?, ?)').run(b.name, newJoinCode(db), t.id, nowIso());
-    setOpenForGroup(db, Number(r.lastInsertRowid), DEFAULT_OPEN);
+    setOpenForGroup(db, Number(r.lastInsertRowid), DEFAULT_OPEN, ctx.practices.order());
     return { group: groupView(ownGroup(t.id, Number(r.lastInsertRowid))) };
   });
 
@@ -106,7 +105,7 @@ export function teacherRoutes(app: FastifyInstance, ctx: AppCtx) {
     const t = requireTeacher(req);
     const { ai } = parse(z.object({ ai: z.boolean().default(false) }), req.body ?? {});
     const d = ownDraft(t.id, Number(req.params.studentId), req.params.practiceId);
-    const practice = getPractice(req.params.practiceId);
+    const practice = ctx.practices.get(req.params.practiceId);
     if (!practice) throw notFound('Практика не найдена');
     if (practice.kind === 'quiz') throw badRequest('Тест проверяется только при сдаче');
     const out = await runChecks(ctx, practice, d.code, d.circuit);
@@ -135,7 +134,7 @@ export function teacherRoutes(app: FastifyInstance, ctx: AppCtx) {
     const t = requireTeacher(req);
     const { id } = parse(IdParam, req.params);
     ownGroup(t.id, id);
-    return { open: openForGroup(db, id) };
+    return { open: openForGroup(db, id, ctx.practices.order()) };
   });
 
   app.put('/api/teacher/groups/:id/access', async (req) => {
@@ -143,10 +142,10 @@ export function teacherRoutes(app: FastifyInstance, ctx: AppCtx) {
     const { id } = parse(IdParam, req.params);
     ownGroup(t.id, id);
     const b = parse(AccessBody, req.body);
-    const unknown = b.open.filter((p) => !getPractice(p));
+    const unknown = b.open.filter((p) => !ctx.practices.isVisible(p));
     if (unknown.length) throw badRequest(`Неизвестные практики: ${unknown.join(', ')}`);
-    setOpenForGroup(db, id, b.open);
-    return { open: openForGroup(db, id) };
+    setOpenForGroup(db, id, b.open, ctx.practices.order());
+    return { open: openForGroup(db, id, ctx.practices.order()) };
   });
 
   app.delete('/api/teacher/groups/:id', async (req) => {
@@ -217,7 +216,7 @@ export function teacherRoutes(app: FastifyInstance, ctx: AppCtx) {
 
   app.get<{ Params: { id: string } }>('/api/teacher/practices/:id/solution', async (req) => {
     requireTeacher(req);
-    const p = getPractice(req.params.id);
+    const p = ctx.practices.get(req.params.id);
     if (!p) throw notFound('Практика не найдена');
     return { code: p.solution.code, circuit: p.solution.circuit ?? p.starterCircuit };
   });
@@ -237,7 +236,7 @@ export function teacherRoutes(app: FastifyInstance, ctx: AppCtx) {
     const t = requireTeacher(req);
     const b = parse(AssignmentBody, req.body);
     ownGroup(t.id, b.groupId);
-    if (!getPractice(b.practiceId)) throw notFound('Практика не найдена');
+    if (!ctx.practices.get(b.practiceId)) throw notFound('Практика не найдена');
     const due = new Date(b.dueAt).toISOString();
     const r = db.prepare('INSERT INTO assignments (group_id, practice_id, due_at, created_at) VALUES (?, ?, ?, ?)').run(b.groupId, b.practiceId, due, nowIso());
     return { assignment: { id: Number(r.lastInsertRowid), groupId: b.groupId, practiceId: b.practiceId, dueAt: due } };

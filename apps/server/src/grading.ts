@@ -46,16 +46,16 @@ export function userAchievements(db: DB, userId: number): string[] {
 }
 
 /** Достижения, которые сервер проверяет после сдачи. */
-export function awardAfterSubmission(db: DB, userId: number, practice: Practice, passed: boolean, hintsUsed: number, at: Date): string[] {
+export function awardAfterSubmission(db: DB, userId: number, practice: Practice, passed: boolean, hintsUsed: number, at: Date, catalog: Practice[] = PRACTICES): string[] {
   const out: string[] = [];
   const give = (id: string) => { if (grant(db, userId, id)) out.push(id); };
   if (!passed) return out;
   give('first-check');
   const done = new Set((db.prepare("SELECT DISTINCT practice_id FROM submissions WHERE user_id = ? AND status = 'passed'").all(userId) as { practice_id: string }[])
     .map((r) => r.practice_id));
-  const modulePractices = PRACTICES.filter((p) => p.module === practice.module);
+  const modulePractices = catalog.filter((p) => p.module === practice.module);
   if (modulePractices.length && modulePractices.every((p) => done.has(p.id))) give(`module-${practice.module}`);
-  const cases = PRACTICES.filter((p) => p.kind === 'case');
+  const cases = catalog.filter((p) => p.kind === 'case');
   if (practice.kind === 'case') {
     if (cases.every((p) => done.has(p.id))) give('all-cases');
     if (hintsUsed === 0) give('no-hints');

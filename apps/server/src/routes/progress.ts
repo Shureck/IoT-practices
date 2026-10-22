@@ -4,7 +4,7 @@ import type { AppCtx } from '../ctx';
 import { perUser } from '../ctx';
 import { requireUser, userXp } from '../auth';
 import { badRequest, notFound, parse } from '../errors';
-import { CLIENT_ACHIEVEMENTS, getPractice, grant, userAchievements } from '../grading';
+import { CLIENT_ACHIEVEMENTS, grant, userAchievements } from '../grading';
 import { CircuitSchema, CodeSchema } from './common';
 import { nowIso, type DB } from '../db';
 import { openForUser } from '../access';
@@ -69,7 +69,7 @@ export function progressRoutes(app: FastifyInstance, ctx: AppCtx) {
 
   app.put<{ Params: { practiceId: string } }>('/api/drafts/:practiceId', { config: perUser(120) }, async (req) => {
     const u = requireUser(req);
-    if (!getPractice(req.params.practiceId)) throw notFound('Практика не найдена');
+    if (!ctx.practices.get(req.params.practiceId)) throw notFound('Практика не найдена');
     const b = parse(DraftBody, req.body);
     const circuit = JSON.stringify(b.circuit);
     if (Buffer.byteLength(b.code, 'utf8') + Buffer.byteLength(circuit, 'utf8') > MAX_DRAFT) throw badRequest('Черновик слишком большой (больше 256 КБ)');
@@ -86,7 +86,7 @@ export function progressRoutes(app: FastifyInstance, ctx: AppCtx) {
       ? (db.prepare('SELECT id, group_id, practice_id, due_at FROM assignments WHERE group_id = ? ORDER BY due_at').all(u.group_id) as Parameters<typeof assignmentView>[0][]).map(assignmentView)
       : [];
     // open: открытые преподавателем практики (null — открыто всё)
-    return { xp: userXp(db, u.id), achievements: userAchievements(db, u.id), items, assignments, open: openForUser(db, u) };
+    return { xp: userXp(db, u.id), achievements: userAchievements(db, u.id), items, assignments, open: openForUser(db, u, ctx.practices.order()) };
   });
 
   app.post<{ Params: { id: string } }>('/api/achievements/:id', { config: perUser(30) }, async (req) => {

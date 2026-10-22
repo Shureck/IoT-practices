@@ -117,6 +117,26 @@ const MIGRATIONS: string[] = [
   'ALTER TABLE submissions ADD COLUMN ai_feedback TEXT;',
   // 4 — кто запросил ИИ-разбор: 'student' (студент видел его после сдачи) или 'teacher'
   'ALTER TABLE submissions ADD COLUMN ai_feedback_by TEXT;',
+  // 5 — задачи из файлов (редактор задач): свои задачи и правки встроенных; история правок
+  `
+  CREATE TABLE IF NOT EXISTS tasks (
+    id TEXT PRIMARY KEY,
+    kind TEXT NOT NULL CHECK (kind IN ('custom', 'override')),
+    spec TEXT NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    updated_at TEXT NOT NULL,
+    updated_by INTEGER REFERENCES users(id) ON DELETE SET NULL
+  );
+  CREATE TABLE IF NOT EXISTS task_revisions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id TEXT NOT NULL,
+    spec TEXT NOT NULL,
+    note TEXT,
+    created_at TEXT NOT NULL,
+    author_id INTEGER REFERENCES users(id) ON DELETE SET NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_task_revisions ON task_revisions(task_id, id);
+  `,
 ];
 
 export function openDb(dataDir: string): DB {
