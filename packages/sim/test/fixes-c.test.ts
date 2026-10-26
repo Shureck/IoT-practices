@@ -68,3 +68,20 @@ describe('устойчивость компилятора', () => {
     expect(r.diagnostics.some((d) => /уже определена/.test(d.message))).toBe(true);
   });
 });
+
+describe('критическая секция', () => {
+  it('portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED; компилируется и работает', async () => {
+    const h = ctx(`portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
+volatile int shared = 0;
+void setup() {
+  Serial.begin(115200);
+  portENTER_CRITICAL(&mux);
+  shared++;
+  portEXIT_CRITICAL(&mux);
+  Serial.println(shared);
+}
+void loop() {}`);
+    await h.wait(200);
+    expect(h.serialLines()).toEqual(['1']);
+  });
+});

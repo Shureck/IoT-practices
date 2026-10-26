@@ -1155,6 +1155,8 @@ class Compiler {
         if (from.k === 'null' || from.k === 'any') return r.c;
         if (to.name === 'IPAddress' && from.k === 'cstr') return `L.IPAddress.from(${r.c})`;
         if (to.name.endsWith('Handle_t') || to.name === 'hw_timer_t') return r.c;
+        // portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
+        if (to.name === 'portMUX_TYPE' && from.k === 'int') return r.c;
         this.error(`Нельзя преобразовать ${tyName(from)} в ${to.name}`, at);
       // eslint-disable-next-line no-fallthrough
       case 'json':
